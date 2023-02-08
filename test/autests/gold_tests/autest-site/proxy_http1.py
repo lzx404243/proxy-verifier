@@ -20,6 +20,73 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from directive_engine import DirectiveEngine
 
+import logging
+import argparse
+import socket
+import struct
+import time
+
+
+class ProxyProtocolUtil:
+
+    VERSION_2_SIGNATURE = b'\x0D\x0A\x0D\x0A\x00\x0D\x0A\x51\x55\x49\x54\x0A'
+
+    @staticmethod
+    def construct_proxy_header_v1(src_addr, dst_addr):
+        # Construct the PROXY protocol v1 header
+        return f"PROXY {src_addr[0]} {dst_addr[0]} {src_addr[1]} {dst_addr[1]}\r\n".encode()
+
+    @staticmethod
+    def construct_proxy_header_v2(src_addr, dst_addr):
+        # Construct the PROXY protocol v2 header
+        header = ProxyProtocolUtil.VERSION_2_SIGNATURE
+        # Protocol version 2 + PROXY command
+        header += b'\x21'
+        # TCP over IPv4
+        header += b'\x11'
+        # address length
+        header += b'\x00\x0C'
+        header += socket.inet_pton(socket.AF_INET, src_addr[0])
+        header += socket.inet_pton(socket.AF_INET, dst_addr[0])
+        header += struct.pack('!H', src_addr[1])
+        header += struct.pack('!H', dst_addr[1])
+        return header
+
+    @staticmethod
+    def send_proxy_header(socket, src_ip, src_port, dest_ip, dest_port, proxy_protocol_version):
+        print(f'Sending PROXY protocol version {proxy_protocol_version}')
+        proxy_header_data = ProxyProtocolUtil.construct_proxy_header_v1(
+            (src_ip, src_port), (dest_ip, dest_port)) \
+            if proxy_protocol_version == 1 else ProxyProtocolUtil.construct_proxy_header_v2((src_ip, src_port), (dest_ip, dest_port))
+        socket.sendall(proxy_header_data)
+        time.sleep(1)
+
+    @staticmethod
+    def send_http(sock):
+        sock.sendall("GET /test HTTP/1.1\r\n\r\n".encode())
+
+    def send_proxy_and_http(server_address, server_port, proxy_src_ip, proxy_src_port, proxy_dest_ip, proxy_dest_port, protocol_version, send_https = False):
+        with socket.create_connection((server_address, server_port)) as sock:
+            # send the PROXY header
+            ProxyProtocolUtil.send_proxy_header(sock,
+                                                proxy_src_ip,
+                                                proxy_src_port,
+                                                proxy_dest_ip,
+                                                proxy_dest_port,
+                                                protocol_version)
+            if send_https:
+                # https
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                with context.wrap_socket(sock) as ssock:
+                    ProxyProtocolUtil.send_http(ssock)
+                    time.sleep(1)
+            else:
+                # plain http
+                ProxyProtocolUtil.send_http(sock)
+                time.sleep(1)
+
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     address_family = socket.AF_INET
@@ -60,8 +127,30 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 
         self.log_message(fmt, *args)
 
+    # @staticmethod
+    # def format_proxy_message(client_ip, client_port, server_ip, server_port):
+    #     return f'PROXY {client_ip} {server_ip} {client_port} {server_port}'
+
+    # def send_proxy_protocol(self, client_ip, client_port, server_ip, server_port):
+    #     # Create a TCP/IP socket
+    #     sock_to_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #     # Connect the socket to the server
+    #     server_address = (server_ip, server_port)
+    #     sock_to_server.connect(server_address)
+    #     proxy_message = self.format_proxy_message(
+    #         client_ip, client_port, server_ip, server_port)
+    #     print(f'sending proxy message: {proxy_message}')
+    #     # Send the PROXY message
+    #     sock_to_server.sendall(bytes(proxy_message, "utf-8"))
+
     def do_GET(self):
         req = self
+        # send PROXY message
+        # self.send_proxy_protocol(
+        #     req.client_address[0], req.client_address[1], server_ip='127.0.0.1', server_port=self.server_port)
+        ProxyProtocolUtil.send_proxy_and_http(server_address='127.0.0.1', server_port=self.server_port, proxy_src_ip='111.111.111.111', proxy_src_port=1234, proxy_dest_ip='222.222.222.222', proxy_dest_port=5678, protocol_version= 1)
+        self.send_error(511)
+        return
         content_length = int(req.headers.get('Content-Length', 0))
         req_body = b''
         if content_length:
@@ -99,7 +188,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             req.headers['Content-length'] = str(len(req_body))
 
         u = urllib.parse.urlsplit(req.path)
-        scheme, netloc, path = u.scheme, u.netloc, (u.path + '?' + u.query if u.query else u.path)
+        scheme, netloc, path = u.scheme, u.netloc, (
+            u.path + '?' + u.query if u.query else u.path)
         assert scheme in ('http', 'https')
         final_url = self.get_url(req.headers, path)
         setattr(req, 'headers', self.filter_headers(req.headers))
@@ -209,7 +299,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     do_options = do_GET
 
     def relay_streaming(self, res):
-        self.wfile.write(f"{self.protocol_version} {res.status} {res.reason}\r\n")
+        self.wfile.write(
+            f"{self.protocol_version} {res.status} {res.reason}\r\n")
         for line in res.headers.headers:
             self.wfile.write(line)
         self.end_headers()
