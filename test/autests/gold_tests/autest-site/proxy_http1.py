@@ -19,7 +19,7 @@ import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from directive_engine import DirectiveEngine
-
+import proxy_protocol_context
 import logging
 import argparse
 import socket
@@ -65,7 +65,7 @@ class ProxyProtocolUtil:
     def send_http(sock):
         sock.sendall("GET /test HTTP/1.1\r\n\r\n".encode())
 
-    def send_proxy_and_http(server_address, server_port, proxy_src_ip, proxy_src_port, proxy_dest_ip, proxy_dest_port, protocol_version, send_https = False):
+    def send_proxy_and_http(server_address, server_port, proxy_src_ip, proxy_src_port, proxy_dest_ip, proxy_dest_port, protocol_version, send_https=False):
         with socket.create_connection((server_address, server_port)) as sock:
             # send the PROXY header
             ProxyProtocolUtil.send_proxy_header(sock,
@@ -144,13 +144,13 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     #     sock_to_server.sendall(bytes(proxy_message, "utf-8"))
 
     def do_GET(self):
+        print('entering the handler!!')
         req = self
         # send PROXY message
-        # self.send_proxy_protocol(
-        #     req.client_address[0], req.client_address[1], server_ip='127.0.0.1', server_port=self.server_port)
-        ProxyProtocolUtil.send_proxy_and_http(server_address='127.0.0.1', server_port=self.server_port, proxy_src_ip='111.111.111.111', proxy_src_port=1234, proxy_dest_ip='222.222.222.222', proxy_dest_port=5678, protocol_version= 1)
-        self.send_error(511)
-        return
+        # ProxyProtocolUtil.send_proxy_and_http(server_address='127.0.0.1', server_port=self.server_port, proxy_src_ip='111.111.111.111',
+        #                                       proxy_src_port=1234, proxy_dest_ip='222.222.222.222', proxy_dest_port=5678, protocol_version=1)
+        # self.send_error(511)
+        # return
         content_length = int(req.headers.get('Content-Length', 0))
         req_body = b''
         if content_length:
@@ -418,9 +418,16 @@ def configure_http1_server(HandlerClass, ServerClass, protocol,
         client_to_proxy_context.set_servername_callback(servername_callback)
         httpd.socket = client_to_proxy_context.wrap_socket(
             httpd.socket, server_side=True)
-
+    # wrap the socket with proxy protocol socket
+    pp_context = proxy_protocol_context.ProxyProtocolCtx()
+    # print("wrapping socket with proxy protocol")
+    httpd.socket = pp_context.wrap_socket(httpd.socket)
+    print(f'httpd type is {type(httpd)}')
+    print(f'httpd socket type is {type(httpd.socket)}')
     sa = httpd.socket.getsockname()
     print(
         f"Serving HTTP Proxy on {sa[0]}:{sa[1]}, forwarding to "
         f"127.0.0.1:{server_port}")
+    import pdb
+    # pdb.set_trace()
     httpd.serve_forever()
