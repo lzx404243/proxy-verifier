@@ -761,14 +761,6 @@ protected:
    */
   virtual swoc::Rv<ssize_t> read_headers(swoc::FixedBufferWriter &w);
 
-  /** Read the headers to a buffer.
-   *
-   * @param[in] w The buffer into which to write the headers.
-   *
-   * @return The number of bytes read and an errata with messaging.
-   */
-  swoc::Rv<ssize_t> read_proxy_headers(swoc::FixedBufferWriter &w);
-
 private:
   virtual swoc::Rv<size_t>
   drain_body_internal(HttpHeader &hdr, Txn const &json_txn, swoc::TextView initial);
@@ -776,7 +768,6 @@ private:
 private:
   int _fd = -1; ///< Socket.
   ssize_t _body_offset = 0;
-  swoc::Rv<ssize_t> read_proxy_header(swoc::FixedBufferWriter &w);
 };
 
 inline int
