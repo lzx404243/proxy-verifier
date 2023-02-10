@@ -26,8 +26,11 @@ class SocketFileWrapper(io.RawIOBase):
 
 
 class ProxyProtocolCtx(socket.socket):
-    # class ppSocket(socket.socket):
-    #     # declare class member variable
+    def __init__(self, client_sock=None):
+        print("calling the overridden init method")
+        self._socket = None
+        self._client_socket = client_sock
+        super().__init__()
 
     def wrap_socket(self, sock, server_side=False):
         self._socket = sock
@@ -38,22 +41,29 @@ class ProxyProtocolCtx(socket.socket):
 
     def fileno(self):
         # todo: may need to change this for the wfile to work
+        print("calling the overridden fileno method")
         return self._socket.fileno()
 
     def accept(self):
-        self._client_socket, client_addr = self._socket.accept()
-        return self, client_addr
+        # self._client_socket, client_addr = self._socket.accept()
+        # return self, client_addr
         # not sure if this is required. Can't we just return the _socket.accept()?
-        # return self.__class__(client_sock), client_addr
+        print("calling the overridden accept method")
+        client_sock, client_addr = self._socket.accept()
+        return self.__class__(client_sock), client_addr
+
+        # the following would pass all tests, but we will not have control over the received data, which defy the purpose of this class
         # return self._socket.accept()
 
     def send(self, data):
-        print("calling the overridden send method")
-        return self._socket.send(data)
+        raise NotImplementedError("send is not implemented")
+        # print("calling the overridden send method")
+        # return self._socket.send(data)
 
     def recv(self, size):
-        print("calling the overridden recv method")
-        return self._socket.recv(size)
+        raise NotImplementedError("recv is not implemented")
+        # print("calling the overridden recv method")
+        # return self._socket.recv(size)
 
     def sendall(self, data):
         print("calling the overridden sendall method")
