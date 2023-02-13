@@ -31,7 +31,7 @@ class SocketFileWrapper(io.RawIOBase):
     def read(self, size):
         print("calling the overriden file object read method!")
         data = self.file.read(size)
-        # todo: process proxy protocol header only if the first read
+        # TODO: process proxy protocol header only if the first read
         data = self.process_proxy_protocol_header_if_present(data)
         # Your processing logic here
         return data
@@ -40,13 +40,13 @@ class SocketFileWrapper(io.RawIOBase):
         print("calling the overriden file object readline method!")
         # Your processing logic here
         line = self.file.readline(size)
-        # todo: process proxy protocol header only if the first read
+        # TODO: process proxy protocol header only if the first read
         line = self.process_proxy_protocol_header_if_present(line)
         return line
 
     def close(self):
         self.file.close()
-    # todo: check write logic also
+    # TODO: check write logic also
 
 
 class ProxyProtocolCtx(socket.socket):
@@ -67,17 +67,15 @@ class ProxyProtocolCtx(socket.socket):
         self, *args, **kwargs): return self._socket.getsockname(*args, **kwargs)
 
     def fileno(self):
-        # todo: may need to change this for the wfile to work. _socket would be replaced with the client socket
+        # TODO: may need to change this for the wfile to work. _socket would be replaced with the client socket
         print("calling the overridden fileno method")
         return self._client_socket.fileno() if self._client_socket else self._socket.fileno()
 
     def accept(self):
         print("calling the overridden accept method")
         client_sock, client_addr = self._socket.accept()
+        # TODO: search for __class__ and see whether can rewrite
         return self.__class__(client_sock), client_addr
-
-        # the following would pass all tests, but we will not have control over the received data, which defy the purpose of this class
-        # return self._socket.accept()
 
     def create_connection(address, timeout, source_address):
         raise NotImplementedError("create_connection is not implemented")

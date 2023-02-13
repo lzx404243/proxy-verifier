@@ -201,7 +201,6 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             origin = (scheme, replay_server)
             if origin not in self.tls.conns:
                 if scheme == 'https':
-
                     class WrapSSSLContext(ssl.SSLContext):
                         '''
                         HTTPSConnection provides no way to specify the
@@ -228,14 +227,26 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                             print("wrapping SSL socket with proxy protocol")
                             pp_sock = pp_context.wrap_socket(ssl_sock)
                             return pp_sock
-
                     proxy_to_server_context = WrapSSSLContext(client_sni)
                     self.tls.conns[origin] = http.client.HTTPSConnection(
                         replay_server, timeout=self.timeout,
                         context=proxy_to_server_context, cert_file=self.cert_file)
                 else:
+                    def wrap_create_connection(address, timeout,
+                                               source_address):
+                        sock = socket.create_connection(
+                            address, timeout, source_address)
+                        # wrap the socket with proxy protocol socket
+                        pp_context = proxy_protocol_context.ProxyProtocolCtx()
+                        print("wrapping socket with proxy protocol")
+                        pp_sock = pp_context.wrap_socket(sock)
+                        return pp_sock
+
                     self.tls.conns[origin] = http.client.HTTPConnection(
                         replay_server, timeout=self.timeout)
+
+                    self.tls.conns[origin]._create_connection = wrap_create_connection
+                    # for http, monkey patch the create_connection method so that the proxy protocol socket is used
             conn = self.tls.conns[origin]
 
             if 'transfer-encoding' in req.headers and req.headers['transfer-encoding'] == 'chunked':
