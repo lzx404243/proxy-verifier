@@ -201,31 +201,35 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             origin = (scheme, replay_server)
             if origin not in self.tls.conns:
                 if scheme == 'https':
-                    if client_sni:
 
-                        class WrapSSSLContext(ssl.SSLContext):
-                            '''
-                            HTTPSConnection provides no way to specify the
-                            server_hostname in the underlying socket. We
-                            accomplish this by wrapping the context to
-                            overrride the wrap_socket behavior (called later
-                            by HTTPSConnection) to specify the
-                            server_hostname that we want.
-                            '''
-                            def __new__(cls, server_hostname, *args, **kwargs):
-                                return super().__new__(cls, *args, *kwargs)
+                    class WrapSSSLContext(ssl.SSLContext):
+                        '''
+                        HTTPSConnection provides no way to specify the
+                        server_hostname in the underlying socket. We
+                        accomplish this by wrapping the context to
+                        overrride the wrap_socket behavior (called later
+                        by HTTPSConnection) to specify the
+                        server_hostname that we want.
+                        '''
+                        def __new__(cls, server_hostname, *args, **kwargs):
+                            return super().__new__(cls, *args, *kwargs)
 
-                            def __init__(self, server_hostname, *args, **kwargs):
-                                super().__init__(*args, **kwargs)
-                                self._server_hostname = server_hostname
+                        def __init__(self, server_hostname, *args, **kwargs):
+                            super().__init__(*args, **kwargs)
+                            self._server_hostname = server_hostname
 
-                            def wrap_socket(self, sock, *args, **kwargs):
+                        def wrap_socket(self, sock, *args, **kwargs):
+                            # add server_hostname to kwargs
+                            if self._server_hostname:
                                 kwargs['server_hostname'] = self._server_hostname
-                                return super().wrap_socket(sock, *args, **kwargs)
+                            ssl_sock = super().wrap_socket(sock, *args, **kwargs)
+                            # wrap the socket with proxy protocol socket
+                            pp_context = proxy_protocol_context.ProxyProtocolCtx()
+                            print("wrapping SSL socket with proxy protocol")
+                            pp_sock = pp_context.wrap_socket(ssl_sock)
+                            return pp_sock
 
-                        proxy_to_server_context = WrapSSSLContext(client_sni)
-                    else:
-                        proxy_to_server_context = ssl.SSLContext()
+                    proxy_to_server_context = WrapSSSLContext(client_sni)
                     self.tls.conns[origin] = http.client.HTTPSConnection(
                         replay_server, timeout=self.timeout,
                         context=proxy_to_server_context, cert_file=self.cert_file)
@@ -255,6 +259,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 
             res_body = res.read()
         except Exception as e:
+            print(f"exception message: {e}")
             if origin in self.tls.conns:
                 del self.tls.conns[origin]
             self.send_error(502)

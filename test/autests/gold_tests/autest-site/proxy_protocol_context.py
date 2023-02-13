@@ -58,15 +58,18 @@ class ProxyProtocolCtx(socket.socket):
 
     def wrap_socket(self, sock, server_side=False):
         self._socket = sock
+        self._server_side = server_side
+        if not self._server_side:
+            self._client_socket = sock
         return self
 
-    def getsockname(self, *args, **kwargs):
-        return self._socket.getsockname(*args, **kwargs)
+    def getsockname(
+        self, *args, **kwargs): return self._socket.getsockname(*args, **kwargs)
 
     def fileno(self):
         # todo: may need to change this for the wfile to work. _socket would be replaced with the client socket
         print("calling the overridden fileno method")
-        return self._socket.fileno()
+        return self._client_socket.fileno() if self._client_socket else self._socket.fileno()
 
     def accept(self):
         print("calling the overridden accept method")
@@ -75,6 +78,9 @@ class ProxyProtocolCtx(socket.socket):
 
         # the following would pass all tests, but we will not have control over the received data, which defy the purpose of this class
         # return self._socket.accept()
+
+    def create_connection(address, timeout, source_address):
+        raise NotImplementedError("create_connection is not implemented")
 
     def send(self, data):
         raise NotImplementedError("send is not implemented")
@@ -90,7 +96,7 @@ class ProxyProtocolCtx(socket.socket):
         print("calling the overridden sendall method")
         return self._client_socket.sendall(data)
 
-    def makefile(self, mode, buffering):
+    def makefile(self, mode="r", buffering=None):
         print("proxy ctx makefile is called")
         return SocketFileWrapper(self._client_socket, mode, buffering)
 
