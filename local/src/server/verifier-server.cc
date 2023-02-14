@@ -613,6 +613,8 @@ TF_Serve_Connection(std::thread *t)
         break;
       }
 
+      // TODO: may need to increase the size of this buffer to account for the
+      // PROXY message. may just assume that TLV is not supported in v2
       swoc::LocalBufferWriter<MAX_HDR_SIZE> w;
       auto &&[req_hdr, read_header_errata] = thread_info._session->read_and_parse_request(w);
       thread_errata.note(std::move(read_header_errata));

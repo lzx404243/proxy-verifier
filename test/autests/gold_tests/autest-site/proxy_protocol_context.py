@@ -206,8 +206,13 @@ def parse_pp_v2(pp_bytes: bytes) -> int:
     return 16 + tuple_length
 
 
+# TODO: correct PROXY protocol format to include IP protocol version
 def construct_proxy_header_v1(src_addr, dst_addr):
     # Construct the PROXY protocol v1 header
+    # TODO: remove the commented code
+    # header = f"PROXY {src_addr[0]} {dst_addr[0]} {src_addr[1]} {dst_addr[1]}\r\n".encode(
+    # )
+    # print(f'proxy header: {header}')
     return f"PROXY {src_addr[0]} {dst_addr[0]} {src_addr[1]} {dst_addr[1]}\r\n".encode()
 
 

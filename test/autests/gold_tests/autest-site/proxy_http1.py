@@ -27,67 +27,6 @@ import struct
 import time
 
 
-class ProxyProtocolUtil:
-
-    VERSION_2_SIGNATURE = b'\x0D\x0A\x0D\x0A\x00\x0D\x0A\x51\x55\x49\x54\x0A'
-
-    @staticmethod
-    def construct_proxy_header_v1(src_addr, dst_addr):
-        # Construct the PROXY protocol v1 header
-        return f"PROXY {src_addr[0]} {dst_addr[0]} {src_addr[1]} {dst_addr[1]}\r\n".encode()
-
-    @staticmethod
-    def construct_proxy_header_v2(src_addr, dst_addr):
-        # Construct the PROXY protocol v2 header
-        header = ProxyProtocolUtil.VERSION_2_SIGNATURE
-        # Protocol version 2 + PROXY command
-        header += b'\x21'
-        # TCP over IPv4
-        header += b'\x11'
-        # address length
-        header += b'\x00\x0C'
-        header += socket.inet_pton(socket.AF_INET, src_addr[0])
-        header += socket.inet_pton(socket.AF_INET, dst_addr[0])
-        header += struct.pack('!H', src_addr[1])
-        header += struct.pack('!H', dst_addr[1])
-        return header
-
-    @staticmethod
-    def send_proxy_header(socket, src_ip, src_port, dest_ip, dest_port, proxy_protocol_version):
-        print(f'Sending PROXY protocol version {proxy_protocol_version}')
-        proxy_header_data = ProxyProtocolUtil.construct_proxy_header_v1(
-            (src_ip, src_port), (dest_ip, dest_port)) \
-            if proxy_protocol_version == 1 else ProxyProtocolUtil.construct_proxy_header_v2((src_ip, src_port), (dest_ip, dest_port))
-        socket.sendall(proxy_header_data)
-        time.sleep(1)
-
-    @staticmethod
-    def send_http(sock):
-        sock.sendall("GET /test HTTP/1.1\r\n\r\n".encode())
-
-    def send_proxy_and_http(server_address, server_port, proxy_src_ip, proxy_src_port, proxy_dest_ip, proxy_dest_port, protocol_version, send_https=False):
-        with socket.create_connection((server_address, server_port)) as sock:
-            # send the PROXY header
-            ProxyProtocolUtil.send_proxy_header(sock,
-                                                proxy_src_ip,
-                                                proxy_src_port,
-                                                proxy_dest_ip,
-                                                proxy_dest_port,
-                                                protocol_version)
-            if send_https:
-                # https
-                context = ssl.create_default_context()
-                context.check_hostname = False
-                context.verify_mode = ssl.CERT_NONE
-                with context.wrap_socket(sock) as ssock:
-                    ProxyProtocolUtil.send_http(ssock)
-                    time.sleep(1)
-            else:
-                # plain http
-                ProxyProtocolUtil.send_http(sock)
-                time.sleep(1)
-
-
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     address_family = socket.AF_INET
     daemon_threads = True
