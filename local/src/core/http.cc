@@ -8,6 +8,7 @@
 #include "core/http.h"
 #include "core/verification.h"
 #include "core/ProxyVerifier.h"
+#include "core/proxy-protocol.h"
 
 #include <arpa/inet.h>
 #include <cassert>
@@ -21,6 +22,8 @@
 #include <sys/uio.h>
 #include <thread>
 #include <unistd.h>
+#include <locale>
+#include <codecvt>
 
 #include "swoc/bwf_ex.h"
 #include "swoc/bwf_ip.h"
@@ -417,7 +420,8 @@ HttpHeader::verify_headers(swoc::TextView transaction_key, HttpFields const &rul
         }
       } else {
         if (!rule_check
-                 ->test(transaction_key, field_iter->first, swoc::TextView(field_iter->second))) {
+                 ->test(transaction_key, field_iter->first, swoc::TextView(field_iter->second)))
+        {
           issue_exists = true;
         }
       }
@@ -684,7 +688,8 @@ HttpHeader::Binding::operator()(BufferWriter &w, const swoc::bwf::Spec &spec) co
   if (name.starts_with_nocase(FIELD_PREFIX)) {
     name.remove_prefix(FIELD_PREFIX.size());
     if (auto spot{_hdr._fields_rules->_fields.find(name)};
-        spot != _hdr._fields_rules->_fields.end()) {
+        spot != _hdr._fields_rules->_fields.end())
+    {
       bwformat(w, spec, spot->second);
     } else {
       bwformat(w, spec, TRANSACTION_KEY_NOT_SET);
@@ -745,10 +750,117 @@ Session::read(swoc::MemSpan<char> span)
   return zret;
 }
 
+union ProxyHdr {
+  struct
+  {
+    char line[108];
+  } v1;
+  struct
+  {
+    uint8_t sig[12];
+    uint8_t ver_cmd;
+    uint8_t fam;
+    uint16_t len;
+    union {
+      struct
+      { /* for TCP/UDP over IPv4, len = 12 */
+        uint32_t src_addr;
+        uint32_t dst_addr;
+        uint16_t src_port;
+        uint16_t dst_port;
+      } ip4;
+      struct
+      { /* for TCP/UDP over IPv6, len = 36 */
+        uint8_t src_addr[16];
+        uint8_t dst_addr[16];
+        uint16_t src_port;
+        uint16_t dst_port;
+      } ip6;
+      //   struct
+      //   { /* for AF_UNIX sockets, len = 216 */
+      //     uint8_t src_addr[108];
+      //     uint8_t dst_addr[108];
+      //   } unx;
+    } addr;
+  } v2;
+};
+
+union S {
+  std::int32_t n;     // occupies 4 bytes
+  std::uint16_t s[2]; // occupies 4 bytes
+  std::uint8_t c;     // occupies 1 byte
+};
+
+const char v2sig[12] = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
+
+#include <codecvt>
+
+static swoc::Rv<int>
+parse_proxy_header(swoc::FixedBufferWriter &buffer)
+{
+  swoc::Rv<int> zret{-1};
+  ProxyHdr hdr;
+  std::memcpy(&hdr, buffer.data(), sizeof(hdr));
+  if (buffer.size() >= 16 && memcmp(&hdr.v2, v2sig, 12) == 0 && (hdr.v2.ver_cmd & 0xF0) == 0x20) {
+    zret.note(S_INFO, "got proxy protocol version 2");
+    // size = 16 + ntohs(hdr.v2.len);
+    // if (ret < size)
+    //   return -1; /* truncated or too large header */
+
+    switch (hdr.v2.ver_cmd & 0xF) {
+    case 0x01: /* PROXY command */
+      switch (hdr.v2.fam) {
+      case 0x11: /* TCPv4 */
+        zret.note(S_INFO, "TCPv4");
+        break;
+      case 0x21: /* TCPv6 */
+        zret.note(S_INFO, "TCPv6");
+        break;
+      default:
+        /* unsupported protocol, keep local connection address */
+        zret.note(S_ERROR, "unknown transport!");
+        break;
+      }
+    case 0x00: /* LOCAL command */
+      /* keep local connection address for LOCAL */
+      zret.note(S_INFO, "local command");
+      break;
+    default:
+      zret.note(S_ERROR, "unknown command!");
+      return zret; /* not a supported command */
+    }
+    zret = 1;
+    return zret;
+  } else if (buffer.size() >= 8 && memcmp(hdr.v1.line, "PROXY", 5) == 0) {
+    zret.note(S_INFO, "got proxy protocol version 1");
+    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> converter;
+    std::wstring decoded_string = converter.from_bytes(hdr.v1.line);
+
+    std::cout << "proxy protocol header content " << std::endl;
+    std::wcout << decoded_string << std::endl;
+    // zret.note(S_INFO, "proxy protocol header content {}", decoded_string);
+    zret = 1;
+    return zret;
+  } else {
+    /* Wrong protocol */
+    // zret.note(S_ERROR, "not proxy protocol!");
+    return zret;
+  }
+  return zret;
+}
+
 swoc::Rv<std::shared_ptr<HttpHeader>>
 Session::read_and_parse_request(swoc::FixedBufferWriter &buffer)
 {
   swoc::Rv<std::shared_ptr<HttpHeader>> zret{nullptr};
+  bool expect_proxy_header = true;
+  if (expect_proxy_header) {
+    zret.note(S_INFO, "reading PROXY header");
+    auto &&[proxy_header_bytes_read, proxy_read_header_errata] = read_proxy_header(buffer);
+    // todo: find another way to handle this
+    parse_proxy_header(buffer);
+    buffer.clear();
+  }
   auto &&[header_bytes_read, read_header_errata] = read_headers(buffer);
   zret.note(read_header_errata);
   if (!read_header_errata.is_ok()) {
@@ -880,12 +992,47 @@ Session::poll_for_headers(chrono::milliseconds timeout)
 }
 
 swoc::Rv<ssize_t>
+Session::read_proxy_header(swoc::FixedBufferWriter &w)
+{
+  swoc::Rv<ssize_t> zret{-1};
+  while (w.remaining() > 0) {
+    auto n = read(w.aux_span());
+    if (!is_closed()) {
+      // todo: check whether this is a Proxy protocol
+      // Where to start searching for the EOH string.
+      size_t start = std::max<size_t>(w.size(), HTTP_EOH.size()) - HTTP_EOH.size();
+      w.commit(n);
+      size_t offset = w.view().substr(start).find(HTTP_EOH);
+      if (TextView::npos != offset) {
+        zret = start + offset + HTTP_EOH.size();
+        break;
+      }
+    } else {
+      if (w.size()) {
+        zret.note(
+            S_ERROR,
+            R"(Connection closed unexpectedly after {} bytes while waiting for header: {}.)",
+            w.size(),
+            swoc::bwf::Errno{});
+      } else {
+        zret = 0; // clean close between transactions.
+      }
+      break;
+    }
+  }
+  if (zret.is_ok() && zret == -1) {
+    zret.note(S_ERROR, R"(Header exceeded maximum size {}.)", w.capacity());
+  }
+  return zret;
+}
+swoc::Rv<ssize_t>
 Session::read_headers(swoc::FixedBufferWriter &w)
 {
   swoc::Rv<ssize_t> zret{-1};
   while (w.remaining() > 0) {
     auto n = read(w.aux_span());
     if (!is_closed()) {
+      // todo: check whether this is a Proxy protocol
       // Where to start searching for the EOH string.
       size_t start = std::max<size_t>(w.size(), HTTP_EOH.size()) - HTTP_EOH.size();
       w.commit(n);
