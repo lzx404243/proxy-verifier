@@ -223,7 +223,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                                 kwargs['server_hostname'] = self._server_hostname
                             ssl_sock = super().wrap_socket(sock, *args, **kwargs)
                             # wrap the socket with proxy protocol socket
-                            pp_context = proxy_protocol_context.ProxyProtocolCtx()
+                            pp_context = proxy_protocol_context.ProxyProtocolCtx(
+                                server_side=False)
                             print("wrapping SSL socket with proxy protocol")
                             pp_sock = pp_context.wrap_socket(ssl_sock)
                             return pp_sock
@@ -237,7 +238,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                         sock = socket.create_connection(
                             address, timeout, source_address)
                         # wrap the socket with proxy protocol socket
-                        pp_context = proxy_protocol_context.ProxyProtocolCtx()
+                        pp_context = proxy_protocol_context.ProxyProtocolCtx(
+                            server_side=False)
                         print("wrapping socket with proxy protocol")
                         pp_sock = pp_context.wrap_socket(sock)
                         return pp_sock
@@ -435,7 +437,7 @@ def configure_http1_server(HandlerClass, ServerClass, protocol,
         httpd.socket = client_to_proxy_context.wrap_socket(
             httpd.socket, server_side=True)
     # wrap the socket with proxy protocol socket
-    pp_context = proxy_protocol_context.ProxyProtocolCtx()
+    pp_context = proxy_protocol_context.ProxyProtocolCtx(server_side=True)
     # print("wrapping socket with proxy protocol")
     httpd.socket = pp_context.wrap_socket(httpd.socket)
     print(f'httpd type is {type(httpd)}')

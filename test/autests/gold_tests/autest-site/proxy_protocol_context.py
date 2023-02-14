@@ -1,5 +1,7 @@
 import socket
 import io
+import struct
+import time
 # ProxyProtocolCtx is a wrapper around the socket object that is used to append/strip off the proxy protocol header.
 
 PP_V2_PREFIX = b'\x0d\x0a\x0d\x0a\x00\x0d\x0a\x51\x55\x49\x54\x0a'
@@ -50,17 +52,21 @@ class SocketFileWrapper(io.RawIOBase):
 
 
 class ProxyProtocolCtx(socket.socket):
-    def __init__(self, client_sock=None):
+    def __init__(self, server_side, client_sock=None):
         print("calling the overridden init method")
         self._socket = None
         self._client_socket = client_sock
+        self._server_side = server_side
+        self._done_pp_processing = False
         super().__init__()
 
-    def wrap_socket(self, sock, server_side=False):
+    def wrap_socket(self, sock):
         self._socket = sock
-        self._server_side = server_side
         if not self._server_side:
             self._client_socket = sock
+            # for client-side socket, we send the proxy protocol header to the original underlying socket right way.
+            # TODO: send the proxy protocol header here
+            send_proxy_header(self._client_socket, proxy_protocol_version=1)
         return self
 
     def getsockname(
@@ -74,8 +80,8 @@ class ProxyProtocolCtx(socket.socket):
     def accept(self):
         print("calling the overridden accept method")
         client_sock, client_addr = self._socket.accept()
-        # TODO: search for __class__ and see whether can rewrite
-        return self.__class__(client_sock), client_addr
+        # TODO: create a new ProxyProtocolCtx object here. see if there is a better way to do this
+        return ProxyProtocolCtx(server_side=True, client_sock=client_sock), client_addr
 
     def create_connection(address, timeout, source_address):
         raise NotImplementedError("create_connection is not implemented")
@@ -92,6 +98,9 @@ class ProxyProtocolCtx(socket.socket):
 
     def sendall(self, data):
         print("calling the overridden sendall method")
+        if not self._server_side:
+            print("appending the proxy protocol header")
+
         return self._client_socket.sendall(data)
 
     def makefile(self, mode="r", buffering=None):
@@ -195,3 +204,35 @@ def parse_pp_v2(pp_bytes: bytes) -> int:
         f'{tuple_description}')
 
     return 16 + tuple_length
+
+
+def construct_proxy_header_v1(src_addr, dst_addr):
+    # Construct the PROXY protocol v1 header
+    return f"PROXY {src_addr[0]} {dst_addr[0]} {src_addr[1]} {dst_addr[1]}\r\n".encode()
+
+
+def construct_proxy_header_v2(src_addr, dst_addr):
+    # Construct the PROXY protocol v2 header
+    header = PP_V2_PREFIX
+    # Protocol version 2 + PROXY command
+    header += b'\x21'
+    # TCP over IPv4
+    header += b'\x11'
+    # address length
+    header += b'\x00\x0C'
+    header += socket.inet_pton(socket.AF_INET, src_addr[0])
+    header += socket.inet_pton(socket.AF_INET, dst_addr[0])
+    header += struct.pack('!H', src_addr[1])
+    header += struct.pack('!H', dst_addr[1])
+    return header
+
+
+def send_proxy_header(sock, proxy_protocol_version):
+    # get source ip and port from socket
+    print(f'Sending PROXY protocol version {proxy_protocol_version}')
+    proxy_header_construcut_func = construct_proxy_header_v1 if proxy_protocol_version == 1 else construct_proxy_header_v2
+    proxy_header_data = proxy_header_construcut_func(
+        sock.getsockname(), sock.getpeername())
+    sock.sendall(proxy_header_data)
+    # TODO: may be reduce or remove
+    time.sleep(1)
