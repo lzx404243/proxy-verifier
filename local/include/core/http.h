@@ -159,8 +159,6 @@ static const swoc::Lexicon<H2ErrorCode> H2ErrorCodeNames{
 
 static constexpr size_t MAX_HDR_SIZE = 131072; // The max ATS is configured for.
 static constexpr size_t MAX_DRAIN_BUFFER_SIZE = 1 << 20;
-/// PROXY header v1 end of header.
-static constexpr swoc::TextView PROXY_V1_EOH{"\r\n"};
 /// HTTP end of line.
 static constexpr swoc::TextView HTTP_EOL{"\r\n"};
 /// HTTP end of header.
@@ -548,6 +546,7 @@ public:
    */
   std::vector<std::string> _keys_to_await;
 
+  // TODO: is this class required to override the bw format?
 protected:
   class Binding : public swoc::bwf::NameBinding
   {

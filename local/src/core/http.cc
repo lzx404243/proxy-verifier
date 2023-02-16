@@ -8,7 +8,7 @@
 #include "core/http.h"
 #include "core/verification.h"
 #include "core/ProxyVerifier.h"
-#include "core/proxy-protocol.h"
+#include "core/proxy_protocol_util.h"
 
 #include <arpa/inet.h>
 #include <cassert>
@@ -49,6 +49,7 @@ std::bitset<600> HttpHeader::STATUS_NO_CONTENT;
 
 memoized_ip_endpoints_t InterfaceNameToEndpoint::memoized_ip_endpoints;
 
+// TODO: might need to add this type of format for PROXY header
 namespace swoc
 {
 inline namespace SWOC_VERSION_NS
@@ -750,123 +751,6 @@ Session::read(swoc::MemSpan<char> span)
   return zret;
 }
 
-union ProxyHdr {
-  struct
-  {
-    char line[108];
-  } v1;
-  struct
-  {
-    uint8_t sig[12];
-    uint8_t ver_cmd;
-    uint8_t fam;
-    uint16_t len;
-    union {
-      struct
-      { /* for TCP/UDP over IPv4, len = 12 */
-        uint32_t src_addr;
-        uint32_t dst_addr;
-        uint16_t src_port;
-        uint16_t dst_port;
-      } ip4;
-      struct
-      { /* for TCP/UDP over IPv6, len = 36 */
-        uint8_t src_addr[16];
-        uint8_t dst_addr[16];
-        uint16_t src_port;
-        uint16_t dst_port;
-      } ip6;
-      //   struct
-      //   { /* for AF_UNIX sockets, len = 216 */
-      //     uint8_t src_addr[108];
-      //     uint8_t dst_addr[108];
-      //   } unx;
-    } addr;
-  } v2;
-};
-
-union S {
-  std::int32_t n;     // occupies 4 bytes
-  std::uint16_t s[2]; // occupies 4 bytes
-  std::uint8_t c;     // occupies 1 byte
-};
-
-const char v2sig[12] = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
-
-#include <codecvt>
-
-static swoc::Rv<int>
-parse_proxy_header(swoc::FixedBufferWriter &buffer)
-{
-  swoc::Rv<int> zret{-1};
-  ProxyHdr hdr;
-
-  // find the end of the header
-  if (buffer.view().starts_with("PROXY")) {
-    zret.note(S_DIAG, "got proxy protocol version 1");
-    // check header end
-    size_t end = buffer.view().find("\r\n");
-    if (TextView::npos != end) {
-      zret.note(S_DIAG, "find header end at {}", end);
-      zret = end + PROXY_V1_EOH.size();
-      return zret;
-    }
-  } else {
-    zret.note(S_DIAG, "not found proxy protocol version 1");
-    zret = 0;
-    return zret;
-  }
-
-  std::memcpy(&hdr, buffer.data(), sizeof(hdr));
-  if (buffer.size() >= 16 && memcmp(&hdr.v2, v2sig, 12) == 0 && (hdr.v2.ver_cmd & 0xF0) == 0x20) {
-    zret.note(S_DIAG, "got proxy protocol version 2");
-    // size = 16 + ntohs(hdr.v2.len);
-    // if (ret < size)
-    //   return -1; /* truncated or too large header */
-
-    switch (hdr.v2.ver_cmd & 0xF) {
-    case 0x01: /* PROXY command */
-      switch (hdr.v2.fam) {
-      case 0x11: /* TCPv4 */
-        zret.note(S_DIAG, "TCPv4");
-        break;
-      case 0x21: /* TCPv6 */
-        zret.note(S_DIAG, "TCPv6");
-        break;
-      default:
-        /* unsupported protocol, keep local connection address */
-        zret.note(S_ERROR, "unknown transport!");
-        break;
-      }
-      break;
-    case 0x00: /* LOCAL command */
-      /* keep local connection address for LOCAL */
-      zret.note(S_DIAG, "local command");
-      break;
-    default:
-      zret.note(S_ERROR, "unknown command!");
-      return zret; /* not a supported command */
-    }
-    zret = 1;
-    return zret;
-  } else if (buffer.size() >= 8 && memcmp(hdr.v1.line, "PROXY", 5) == 0) {
-    zret.note(S_DIAG, "I got proxy protocol version 1");
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> converter;
-    std::wstring decoded_string = converter.from_bytes(hdr.v1.line);
-
-    std::cout << "proxy protocol header content " << std::endl;
-    std::wcout << decoded_string << std::endl;
-    // zret.note(S_INFO, "proxy protocol header content {}", decoded_string);
-    zret = 1;
-    return zret;
-  } else {
-    /* Wrong protocol */
-    // zret.note(S_ERROR, "not proxy protocol!");
-    return zret;
-  }
-  return zret;
-}
-
 swoc::Rv<std::shared_ptr<HttpHeader>>
 Session::read_and_parse_request(swoc::FixedBufferWriter &buffer)
 {
@@ -881,9 +765,11 @@ Session::read_and_parse_request(swoc::FixedBufferWriter &buffer)
   bool expect_proxy_header = true;
   int http_header_start_offset = 0;
   if (expect_proxy_header) {
+    ProxyProtocolHdr proxy_hdr;
     zret.note(S_INFO, "reading PROXY header");
     // todo: find another way to handle this
-    auto &&[proxy_header_bytes_read, proxy_read_header_errata] = parse_proxy_header(buffer);
+    auto &&[proxy_header_bytes_read, proxy_read_header_errata] =
+        proxy_hdr.parse_header(buffer.view());
     http_header_start_offset = proxy_header_bytes_read;
   }
 

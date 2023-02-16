@@ -593,6 +593,7 @@ TF_Serve_Connection(std::thread *t)
       break;
     }
 
+    // TODO: might want to check for proxy protocol here(before the SSL handshake)
     errata = thread_info._session->accept();
     while (!Shutdown_Flag && !thread_info._session->is_closed() && errata.is_ok()) {
       swoc::Errata thread_errata;
