@@ -53,7 +53,6 @@ class SocketFileWrapper(io.RawIOBase):
 
 class ProxyProtocolCtx(socket.socket):
     def __init__(self, server_side, client_sock=None):
-        print("calling the overridden init method")
         self._socket = None
         self._client_socket = client_sock
         self._server_side = server_side
@@ -61,6 +60,8 @@ class ProxyProtocolCtx(socket.socket):
         super().__init__()
 
     def wrap_socket(self, sock):
+
+        # TODO: learn strucuture from ssl lib: return self.sslsocket_class._create(
         self._socket = sock
         if not self._server_side:
             self._client_socket = sock
@@ -112,6 +113,18 @@ class ProxyProtocolCtx(socket.socket):
 
     def close(self):
         return self._client_socket.close()
+
+    def detach(self):
+        """detach() -> file descriptor
+        Close the socket object without closing the underlying file descriptor.
+        The object cannot be used after this call, but the file descriptor
+        can be reused for other purposes.  The file descriptor is returned.
+        """
+        self._closed = True
+        detached_fd = super().detach()
+        if self._client_socket is not None:
+            return self._client_socket.detach()
+        return detached_fd
 
 
 # utility methods for parsing or encoding the PROXY protocol header

@@ -66,30 +66,9 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 
         self.log_message(fmt, *args)
 
-    # @staticmethod
-    # def format_proxy_message(client_ip, client_port, server_ip, server_port):
-    #     return f'PROXY {client_ip} {server_ip} {client_port} {server_port}'
-
-    # def send_proxy_protocol(self, client_ip, client_port, server_ip, server_port):
-    #     # Create a TCP/IP socket
-    #     sock_to_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #     # Connect the socket to the server
-    #     server_address = (server_ip, server_port)
-    #     sock_to_server.connect(server_address)
-    #     proxy_message = self.format_proxy_message(
-    #         client_ip, client_port, server_ip, server_port)
-    #     print(f'sending proxy message: {proxy_message}')
-    #     # Send the PROXY message
-    #     sock_to_server.sendall(bytes(proxy_message, "utf-8"))
-
     def do_GET(self):
         print('entering the handler!!')
         req = self
-        # send PROXY message
-        # ProxyProtocolUtil.send_proxy_and_http(server_address='127.0.0.1', server_port=self.server_port, proxy_src_ip='111.111.111.111',
-        #                                       proxy_src_port=1234, proxy_dest_ip='222.222.222.222', proxy_dest_port=5678, protocol_version=1)
-        # self.send_error(511)
-        # return
         content_length = int(req.headers.get('Content-Length', 0))
         req_body = b''
         if content_length:
@@ -158,15 +137,16 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 
                         def wrap_socket(self, sock, *args, **kwargs):
                             # add server_hostname to kwargs
-                            if self._server_hostname:
-                                kwargs['server_hostname'] = self._server_hostname
-                            ssl_sock = super().wrap_socket(sock, *args, **kwargs)
-                            # wrap the socket with proxy protocol socket
                             pp_context = proxy_protocol_context.ProxyProtocolCtx(
                                 server_side=False)
-                            print("wrapping SSL socket with proxy protocol")
-                            pp_sock = pp_context.wrap_socket(ssl_sock)
-                            return pp_sock
+                            # wrap the socket with proxy protocol socket first. This ensures that the proxy protocol is sent unencrypted
+                            print("wrapping original socket with proxy protocol")
+                            pp_sock = pp_context.wrap_socket(sock)
+                            if self._server_hostname:
+                                kwargs['server_hostname'] = self._server_hostname
+                            print("wrapping proxy protocol socket with ssl socket")
+                            ssl_sock = super().wrap_socket(pp_sock, *args, **kwargs)
+                            return ssl_sock
                     proxy_to_server_context = WrapSSSLContext(client_sni)
                     self.tls.conns[origin] = http.client.HTTPSConnection(
                         replay_server, timeout=self.timeout,
