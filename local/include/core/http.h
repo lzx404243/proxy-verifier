@@ -762,6 +762,7 @@ protected:
    */
   virtual swoc::Rv<ssize_t> read_headers(swoc::FixedBufferWriter &w);
 
+  // TODO: update comments
   /** Read the headers to a buffer.
    *
    * @param[in] w The buffer into which to write the headers.
@@ -770,6 +771,18 @@ protected:
    */
   swoc::Rv<ssize_t> read_proxy_headers(swoc::FixedBufferWriter &w);
 
+  // TODO: update comments
+  // TODO: check if this function and the corresponding private variable are necessary. it could be
+  // redundant since in verifier-server.cc we do the pp checking at the beginning of a session
+  // anyways
+  /** Read the headers to a buffer.
+   *
+   * @param[in] w The buffer into which to write the headers.
+   *
+   * @return The number of bytes read and an errata with messaging.
+   */
+  bool should_check_for_pp_header() const;
+
 private:
   virtual swoc::Rv<size_t>
   drain_body_internal(HttpHeader &hdr, Txn const &json_txn, swoc::TextView initial);
@@ -777,7 +790,7 @@ private:
 private:
   int _fd = -1; ///< Socket.
   ssize_t _body_offset = 0;
-  swoc::Rv<ssize_t> read_proxy_header(swoc::FixedBufferWriter &w);
+  bool _should_check_for_pp_header = true;
 };
 
 inline int
@@ -792,6 +805,11 @@ Session::is_closed() const
   return _fd < 0;
 }
 
+inline bool
+Session::should_check_for_pp_header() const
+{
+  return _should_check_for_pp_header;
+}
 class ChunkCodex
 {
 public:

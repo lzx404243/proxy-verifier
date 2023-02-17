@@ -11,6 +11,7 @@
 #include "core/https.h"
 #include "core/ProxyVerifier.h"
 #include "core/YamlParser.h"
+#include "core/proxy_protocol_util.h"
 
 #include <array>
 #include <atomic>
@@ -593,7 +594,23 @@ TF_Serve_Connection(std::thread *t)
       break;
     }
 
-    // TODO: might want to check for proxy protocol here(before the SSL handshake)
+    // TODO: want to check for proxy protocol here(before the SSL handshake)
+    // check for proxy protocol header from the socket
+
+    // TODO: make sure this is a non-blocking recv
+    // reading the PROXY data if any on one recv() should be okay, since it's gurantee to fit
+    errata.note(S_INFO, "Peeking at the data to check PROXY header");
+    char buf[1024];
+    size_t bytes_received =
+        recv(thread_info._session->get_fd(), buf, sizeof(buf), MSG_PEEK); // Peek at the data
+
+    errata.note(S_INFO, "Got {} bytes", bytes_received);
+    ProxyProtocolHdr pp_hdr;
+    auto zret = pp_hdr.parse_header({buf, bytes_received});
+    zret.note(S_INFO, "Got {} of pp bytes. consuming it from socket", zret.result());
+    recv(thread_info._session->get_fd(), buf, zret.result(), 0); // Peek at the data
+
+    // Check if the data matches the expected format
     errata = thread_info._session->accept();
     while (!Shutdown_Flag && !thread_info._session->is_closed() && errata.is_ok()) {
       swoc::Errata thread_errata;
@@ -614,8 +631,6 @@ TF_Serve_Connection(std::thread *t)
         break;
       }
 
-      // TODO: may need to increase the size of this buffer to account for the
-      // PROXY message. may just assume that TLV is not supported in v2
       swoc::LocalBufferWriter<MAX_HDR_SIZE> w;
       auto &&[req_hdr, read_header_errata] = thread_info._session->read_and_parse_request(w);
       thread_errata.note(std::move(read_header_errata));

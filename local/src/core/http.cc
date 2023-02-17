@@ -762,27 +762,14 @@ Session::read_and_parse_request(swoc::FixedBufferWriter &buffer)
     return zret;
   }
 
-  bool expect_proxy_header = true;
-  int http_header_start_offset = 0;
-  if (expect_proxy_header) {
-    ProxyProtocolHdr proxy_hdr;
-    zret.note(S_INFO, "reading PROXY header");
-    // todo: find another way to handle this
-    auto &&[proxy_header_bytes_read, proxy_read_header_errata] =
-        proxy_hdr.parse_header(buffer.view());
-    http_header_start_offset = proxy_header_bytes_read;
-  }
-
   _body_offset = header_bytes_read;
   if (_body_offset == 0) {
     return zret;
   }
 
-  zret.note(S_DIAG, "start offset is {}", http_header_start_offset);
   zret = std::make_shared<HttpHeader>();
   auto &hdr = zret.result();
-  auto received_data =
-      TextView(buffer.data() + http_header_start_offset, _body_offset - http_header_start_offset);
+  auto received_data = TextView(buffer.data(), _body_offset);
   auto &&[parse_result, parse_errata] = hdr->parse_request(received_data);
   zret.note(parse_errata);
 
