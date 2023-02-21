@@ -14,6 +14,7 @@
 /// PROXY header v1 end of header.
 static constexpr swoc::TextView PROXY_V1_EOH{"\r\n"};
 
+const char v2sig[12] = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
 union ProxyHdr {
   struct
   {
@@ -49,16 +50,15 @@ union ProxyHdr {
   } v2;
 };
 
-union S {
-  std::int32_t n;     // occupies 4 bytes
-  std::uint16_t s[2]; // occupies 4 bytes
-  std::uint8_t c;     // occupies 1 byte
-};
-
-const char v2sig[12] = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
-
-class ProxyProtocolHdr
+class ProxyProtocolUtil
 {
 public:
-  swoc::Rv<int> parse_header(swoc::TextView data);
+  // TODO: changed to unique pointer
+  ProxyProtocolUtil(std::shared_ptr<ProxyHdr> data) : _hdr(data){};
+  // parse the header, returning the number of bytes if it is a valid header, or
+  // 0 if it is not a PROXY header
+  swoc::Rv<ssize_t> parse_header(ssize_t receivedBytes);
+  // TODO: check access level
+private:
+  std::shared_ptr<ProxyHdr> _hdr;
 };

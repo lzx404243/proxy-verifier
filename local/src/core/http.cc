@@ -49,7 +49,7 @@ std::bitset<600> HttpHeader::STATUS_NO_CONTENT;
 
 memoized_ip_endpoints_t InterfaceNameToEndpoint::memoized_ip_endpoints;
 
-// TODO: might need to add this type of format for PROXY header
+// TODO: might need to add this type of formatting for PROXY header
 namespace swoc
 {
 inline namespace SWOC_VERSION_NS
@@ -715,6 +715,42 @@ Session::~Session()
 }
 
 swoc::Rv<ssize_t>
+Session::peek(swoc::MemSpan<char> span)
+{
+  swoc::Rv<ssize_t> zret{::recv(_fd, span.data(), span.size(), MSG_PEEK)};
+  if (zret == 0) {
+    // End of file.
+    this->close();
+  } else if (zret < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      auto &&[poll_return, poll_errata] = poll_for_data_on_socket(Poll_Timeout);
+      zret.note(std::move(poll_errata));
+      if (!zret.is_ok()) {
+        zret.note(std::move(poll_errata));
+        zret.note(S_ERROR, "Failed to poll for data.");
+        this->close();
+      } else if (poll_return > 0) {
+        // Simply repeat the read now that poll says something is ready.
+        return peek(span);
+      } else if (poll_return == 0) {
+        zret.note(S_ERROR, "Poll timed out waiting for content.");
+        this->close();
+      } else if (poll_return < 0) {
+        // Connection was closed. Nothing to do.
+        zret.note(S_DIAG, "The peer closed the connection while reading during poll.");
+      }
+    } else if (errno == ECONNRESET) {
+      // The other end closed the connection.
+      zret.note(S_DIAG, "The peer closed the connection while reading.");
+      this->close();
+    } else {
+      zret.note(S_ERROR, "Error reading from socket: {}", swoc::bwf::Errno{});
+      this->close();
+    }
+  }
+  return zret;
+}
+swoc::Rv<ssize_t>
 Session::read(swoc::MemSpan<char> span)
 {
   swoc::Rv<ssize_t> zret{::read(_fd, span.data(), span.size())};
@@ -782,6 +818,33 @@ Session::read_and_parse_request(swoc::FixedBufferWriter &buffer)
   return zret;
 }
 
+swoc::Errata
+Session::read_and_parse_proxy_hdr()
+{
+  // reading the PROXY data if any. one recv() should be okay, since it's gurantee to fit
+  auto pp_hdr = std::make_shared<ProxyHdr>();
+  swoc::Errata errata;
+  swoc::MemSpan<void> span{(pp_hdr.get()), sizeof(*pp_hdr)};
+  errata.note(S_INFO, "Peeking at the socketdata to check PROXY header");
+  //  Peek at the data to make sure it's a PROXY header
+  auto zret = peek({reinterpret_cast<char *>(pp_hdr.get()), sizeof(*pp_hdr)});
+  auto bytes_received = zret.result();
+  errata.note(S_INFO, "Got {} bytes", bytes_received);
+  //  got data
+  ProxyProtocolUtil ppUtil{pp_hdr};
+  zret = ppUtil.parse_header(bytes_received);
+  errata.note(zret);
+  int pp_bytes = zret.result();
+  if (pp_bytes > 0) {
+    errata.note(S_INFO, "Got {} of pp bytes. consuming it from socket", pp_bytes);
+    //  TODO: may need while loop
+    recv(_fd, pp_hdr.get(), pp_bytes, 0); // Peek at the data
+    // ppUtil.printHeader();
+  } else {
+    errata.note(S_INFO, "No PROXY header is found", pp_bytes);
+  }
+  return errata;
+}
 swoc::Rv<ssize_t>
 Session::write(TextView view)
 {

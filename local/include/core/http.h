@@ -167,6 +167,7 @@ static constexpr swoc::TextView HTTP_EOH{"\r\n\r\n"};
 class HttpHeader;
 class RuleCheck;
 struct Txn;
+class ProxyProtocolHdr;
 
 constexpr auto Transaction_Delay_Cutoff = std::chrono::seconds{10};
 constexpr auto Poll_Timeout = std::chrono::seconds{5};
@@ -684,6 +685,8 @@ public:
 
   virtual swoc::Rv<std::shared_ptr<HttpHeader>> read_and_parse_request(swoc::FixedBufferWriter &w);
 
+  virtual swoc::Errata read_and_parse_proxy_hdr();
+
   /** Read body bytes out of the socket.
    *
    * @param[in] hdr The headers which specify how many body bytes to read.
@@ -752,8 +755,11 @@ protected:
    *
    * @return The number of bytes read and an errata with any messaging.
    */
-  virtual swoc::Rv<ssize_t> read(swoc::MemSpan<char> span);
 
+  virtual swoc::Rv<ssize_t> read(swoc::MemSpan<char> span);
+  // TODO: add docs/. Peek at the socket data without removing it from the
+  // socket.
+  virtual swoc::Rv<ssize_t> peek(swoc::MemSpan<char> span);
   /** Read the headers to a buffer.
    *
    * @param[in] w The buffer into which to write the headers.
