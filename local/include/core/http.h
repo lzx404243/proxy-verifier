@@ -167,7 +167,7 @@ static constexpr swoc::TextView HTTP_EOH{"\r\n\r\n"};
 class HttpHeader;
 class RuleCheck;
 struct Txn;
-class ProxyProtocolHdr;
+class ProxyProtocolUtil;
 
 constexpr auto Transaction_Delay_Cutoff = std::chrono::seconds{10};
 constexpr auto Poll_Timeout = std::chrono::seconds{5};
@@ -177,6 +177,8 @@ namespace swoc
 inline namespace SWOC_VERSION_NS
 {
 BufferWriter &bwformat(BufferWriter &w, bwf::Spec const &spec, HttpHeader const &h);
+
+BufferWriter &bwformat(BufferWriter &w, bwf::Spec const &spec, ProxyProtocolUtil const &h);
 } // namespace SWOC_VERSION_NS
 } // namespace swoc
 

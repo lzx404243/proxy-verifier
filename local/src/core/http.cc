@@ -28,6 +28,7 @@
 #include "swoc/bwf_ex.h"
 #include "swoc/bwf_ip.h"
 #include "swoc/bwf_std.h"
+#include "swoc/swoc_ip.h"
 
 using swoc::Errata;
 using swoc::TextView;
@@ -49,7 +50,6 @@ std::bitset<600> HttpHeader::STATUS_NO_CONTENT;
 
 memoized_ip_endpoints_t InterfaceNameToEndpoint::memoized_ip_endpoints;
 
-// TODO: might need to add this type of formatting for PROXY header
 namespace swoc
 {
 inline namespace SWOC_VERSION_NS
@@ -79,6 +79,28 @@ bwformat(BufferWriter &w, bwf::Spec const & /* spec */, HttpHeader const &h)
       continue;
     }
     w.print(R"({}: {}{})", key, value, '\n');
+  }
+  return w;
+}
+// custom formatting for the proxy header
+BufferWriter &
+bwformat(BufferWriter &w, bwf::Spec const & /*spec*/, ProxyProtocolUtil const &h)
+{
+  auto version = h.get_version();
+  w.print("Received PROXY header v{}:\n", version);
+  if (version == 1) {
+    // v1 header is sent as a human-readable string. So just print it here.
+    w.print("{}", swoc::TextView(h._hdr->v1.line).prefix_at('\0'));
+  } else {
+    // v2 header
+    // TODO: use the swoc::lexicon to print the transport description(refer to H2FrameNames)
+
+    IPAddr src_addr(reinterpret_cast<in_addr_t>(ntohl(h._hdr->v2.addr.ip4.src_addr)));
+    IPAddr dst_addr(reinterpret_cast<in_addr_t>(ntohl(h._hdr->v2.addr.ip4.dst_addr)));
+    IPEndpoint src_ep, dst_ep;
+    src_ep.assign(src_addr, h._hdr->v2.addr.ip4.src_port);
+    dst_ep.assign(dst_addr, h._hdr->v2.addr.ip4.dst_port);
+    w.print("PROXY {0::a} {1::a} {0::p} {1::p}", src_ep, dst_ep);
   }
   return w;
 }
@@ -840,6 +862,8 @@ Session::read_and_parse_proxy_hdr()
     //  TODO: may need while loop
     recv(_fd, pp_hdr.get(), pp_bytes, 0); // Peek at the data
     // ppUtil.printHeader();
+    // print the proxy message
+    zret.note(S_DIAG, "Received an PROXY header:\n{}", ppUtil);
   } else {
     errata.note(S_INFO, "No PROXY header is found", pp_bytes);
   }

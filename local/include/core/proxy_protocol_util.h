@@ -58,7 +58,16 @@ public:
   // parse the header, returning the number of bytes if it is a valid header, or
   // 0 if it is not a PROXY header
   swoc::Rv<ssize_t> parse_header(ssize_t receivedBytes);
-  // TODO: check access level
-private:
+
+  int get_version() const;
+  // TODO: change the  access level back to private
+public:
   std::shared_ptr<ProxyHdr> _hdr;
+  int _version = 0;
 };
+
+inline int
+ProxyProtocolUtil::get_version() const
+{
+  return _version;
+}
