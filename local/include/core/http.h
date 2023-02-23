@@ -21,6 +21,8 @@
 #include <string>
 #include <vector>
 
+#include "core/proxy_protocol_util.h"
+
 #include "swoc/BufferWriter.h"
 #include "swoc/Errata.h"
 #include "swoc/Lexicon.h"
@@ -618,6 +620,8 @@ struct Ssn
   bool is_tls = false;
   bool is_h2 = false;
   bool is_h3 = false;
+  bool send_pp_header = false;
+  ProxyProtocolVersion pp_version;
 
   swoc::Errata post_process_transactions();
 };
@@ -688,6 +692,9 @@ public:
   virtual swoc::Rv<std::shared_ptr<HttpHeader>> read_and_parse_request(swoc::FixedBufferWriter &w);
 
   virtual swoc::Errata read_and_parse_proxy_hdr();
+  virtual swoc::Errata send_proxy_header(
+      swoc::IPEndpoint const *real_target,
+      ProxyProtocolVersion pp_version);
 
   /** Read body bytes out of the socket.
    *

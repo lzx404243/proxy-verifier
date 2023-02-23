@@ -8,7 +8,6 @@
 #include "core/http.h"
 #include "core/verification.h"
 #include "core/ProxyVerifier.h"
-#include "core/proxy_protocol_util.h"
 
 #include <arpa/inet.h>
 #include <cassert>
@@ -88,8 +87,9 @@ bwformat(BufferWriter &w, bwf::Spec const & /*spec*/, ProxyProtocolUtil const &h
 {
   auto version = h.get_version();
   w.print("Received PROXY header v{}:\n", version);
-  if (version == 1) {
-    // v1 header is sent as a human-readable string. So just print it here.
+  if (version == ProxyProtocolVersion::V1) {
+    // v1 header is sent as a human-readable string. So we can just print it
+    // here.
     w.print("{}", swoc::TextView(h._hdr->v1.line).prefix_at('\0'));
   } else {
     // v2 header
@@ -909,6 +909,24 @@ Session::write(TextView view)
     }
   }
   return zret;
+}
+swoc::Errata
+Session::send_proxy_header(swoc::IPEndpoint const *real_target, ProxyProtocolVersion pp_version)
+{
+  // get source endpoint
+  swoc::Errata errata;
+  struct sockaddr addr;
+  socklen_t len = sizeof(addr);
+  getsockname(_fd, &addr, &len);
+  swoc::IPEndpoint source_endpoint{&addr};
+  ProxyProtocolUtil ppUtil(source_endpoint, *real_target, pp_version);
+  // make the following this a constant
+  constexpr size_t MAX_PP_HDR_SIZE = 108;
+  swoc::LocalBufferWriter<MAX_PP_HDR_SIZE> w;
+  ppUtil.serialize(w);
+  errata.note(S_INFO, "Sending PROXY header from {} to {}", source_endpoint, *real_target);
+  // send the textview containing the data
+  return errata;
 }
 
 swoc::Rv<ssize_t>

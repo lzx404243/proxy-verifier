@@ -10,11 +10,17 @@
 #include "swoc/Errata.h"
 #include "swoc/BufferWriter.h"
 #include "swoc/TextView.h"
+#include "swoc/swoc_ip.h"
+
+enum class ProxyProtocolVersion {
+  V1,
+  V2,
+};
 
 /// PROXY header v1 end of header.
 static constexpr swoc::TextView PROXY_V1_EOH{"\r\n"};
 
-const char v2sig[12] = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
+const char V2SIG[12] = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
 union ProxyHdr {
   struct
   {
@@ -50,23 +56,38 @@ union ProxyHdr {
   } v2;
 };
 
+// TODO: rename to proxyProtocol
 class ProxyProtocolUtil
 {
 public:
-  // TODO: changed to unique pointer
+  ProxyProtocolUtil() = default;
+  // TODO: make the following constructor to take a ProxyHdr buf. Call parse
+  // in it
   ProxyProtocolUtil(std::shared_ptr<ProxyHdr> data) : _hdr(data){};
+  ProxyProtocolUtil(ProxyProtocolVersion version) : _version(version){};
+  ProxyProtocolUtil(swoc::IPEndpoint src_ep, swoc::IPEndpoint dst_ep, ProxyProtocolVersion version)
+    : _version(version)
+    , _src_addr(src_ep)
+    , _dst_addr(dst_ep){};
+
   // parse the header, returning the number of bytes if it is a valid header, or
   // 0 if it is not a PROXY header
   swoc::Rv<ssize_t> parse_header(ssize_t receivedBytes);
 
-  int get_version() const;
+  ProxyProtocolVersion get_version() const;
+  swoc::Errata serialize(swoc::BufferWriter &buf) const;
+  swoc::Errata construct_v1_header(swoc::BufferWriter &buf) const;
+  swoc::Errata construct_v2_header(swoc::BufferWriter &buf) const;
   // TODO: change the  access level back to private
 public:
+  // TODO: remove the _hdr
   std::shared_ptr<ProxyHdr> _hdr;
-  int _version = 0;
+  ProxyProtocolVersion _version;
+  swoc::IPEndpoint _src_addr;
+  swoc::IPEndpoint _dst_addr;
 };
 
-inline int
+inline ProxyProtocolVersion
 ProxyProtocolUtil::get_version() const
 {
   return _version;
