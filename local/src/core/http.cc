@@ -86,7 +86,7 @@ BufferWriter &
 bwformat(BufferWriter &w, bwf::Spec const & /*spec*/, ProxyProtocolUtil const &h)
 {
   auto version = h.get_version();
-  w.print("Received PROXY header v{}:\n", version);
+  w.print("Received PROXY header v{}:\n", static_cast<int>(version));
   if (version == ProxyProtocolVersion::V1) {
     // v1 header is sent as a human-readable string. So we can just print it
     // here.
@@ -94,7 +94,6 @@ bwformat(BufferWriter &w, bwf::Spec const & /*spec*/, ProxyProtocolUtil const &h
   } else {
     // v2 header
     // TODO: use the swoc::lexicon to print the transport description(refer to H2FrameNames)
-
     IPAddr src_addr(reinterpret_cast<in_addr_t>(ntohl(h._hdr->v2.addr.ip4.src_addr)));
     IPAddr dst_addr(reinterpret_cast<in_addr_t>(ntohl(h._hdr->v2.addr.ip4.dst_addr)));
     IPEndpoint src_ep, dst_ep;
@@ -847,25 +846,25 @@ Session::read_and_parse_proxy_hdr()
   auto pp_hdr = std::make_shared<ProxyHdr>();
   swoc::Errata errata;
   swoc::MemSpan<void> span{(pp_hdr.get()), sizeof(*pp_hdr)};
-  errata.note(S_INFO, "Peeking at the socketdata to check PROXY header");
+  errata.note(S_DIAG, "Peeking at the socketdata to check PROXY header");
   //  Peek at the data to make sure it's a PROXY header
   auto zret = peek({reinterpret_cast<char *>(pp_hdr.get()), sizeof(*pp_hdr)});
   auto bytes_received = zret.result();
-  errata.note(S_INFO, "Got {} bytes", bytes_received);
+  errata.note(S_DIAG, "Got {} bytes", bytes_received);
   //  got data
   ProxyProtocolUtil ppUtil{pp_hdr};
-  zret = ppUtil.parse_header(bytes_received);
-  errata.note(zret);
-  int pp_bytes = zret.result();
+  auto &&[pp_parse_return, pp_parse_errata] = ppUtil.parse_header(bytes_received);
+  errata.note(std::move(pp_parse_errata));
+  int pp_bytes = pp_parse_return;
   if (pp_bytes > 0) {
-    errata.note(S_INFO, "Got {} of pp bytes. consuming it from socket", pp_bytes);
+    errata.note(S_DIAG, "Got {} of pp bytes. consuming it from socket", pp_bytes);
     //  TODO: may need while loop
     recv(_fd, pp_hdr.get(), pp_bytes, 0); // Peek at the data
     // ppUtil.printHeader();
     // print the proxy message
     zret.note(S_DIAG, "Received an PROXY header:\n{}", ppUtil);
   } else {
-    errata.note(S_INFO, "No PROXY header is found", pp_bytes);
+    errata.note(S_DIAG, "No PROXY header is found", pp_bytes);
   }
   return errata;
 }
@@ -924,7 +923,7 @@ Session::send_proxy_header(swoc::IPEndpoint const *real_target, ProxyProtocolVer
   constexpr size_t MAX_PP_HDR_SIZE = 108;
   swoc::LocalBufferWriter<MAX_PP_HDR_SIZE> w;
   ppUtil.serialize(w);
-  errata.note(S_INFO, "Sending PROXY header from {} to {}", source_endpoint, *real_target);
+  errata.note(S_DIAG, "Sending PROXY header from {} to {}", source_endpoint, *real_target);
   // send the textview containing the data
   return errata;
 }

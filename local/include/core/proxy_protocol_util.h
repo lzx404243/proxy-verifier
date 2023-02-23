@@ -12,10 +12,7 @@
 #include "swoc/TextView.h"
 #include "swoc/swoc_ip.h"
 
-enum class ProxyProtocolVersion {
-  V1,
-  V2,
-};
+enum class ProxyProtocolVersion { V1 = 1, V2 = 2 };
 
 /// PROXY header v1 end of header.
 static constexpr swoc::TextView PROXY_V1_EOH{"\r\n"};

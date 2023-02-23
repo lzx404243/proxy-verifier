@@ -80,7 +80,7 @@ ProxyProtocolUtil::parse_header(ssize_t receivedBytes)
     return zret;
   } else {
     /* Wrong protocol */
-    zret.note(S_ERROR, "not proxy protocol!");
+    zret.note(S_DIAG, "not proxy protocol. Passing through");
     return zret;
   }
   return zret;
