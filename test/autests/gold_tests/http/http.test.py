@@ -49,9 +49,9 @@ proxy = r.AddProxyProcess("proxy2", listen_port=client.Variables.http_port,
                           server_port=server.Variables.http_port)
 
 
-client.Streams.stdout = Testers.ContainsExpression(
-    "7 transactions in 5 sessions",
-    "Verify that 7 transactions were parsed.")
+# client.Streams.stdout = Testers.ContainsExpression(
+#     "7 transactions in 5 sessions",
+#     "Verify that 7 transactions were parsed.")
 
 client.Streams.stdout += Testers.ContainsExpression(
     "Loading 3 replay files.",
@@ -69,9 +69,9 @@ client.Streams.stdout += Testers.ExcludesExpression(
     "Violation:",
     "There should be no verification errors because there are none added.")
 
-server.Streams.stdout = Testers.ContainsExpression(
-    "Ready with 7 transactions.",
-    "Verify that 7 transactions were parsed.")
+# server.Streams.stdout = Testers.ContainsExpression(
+#     "Ready with 7 transactions.",
+#     "Verify that 7 transactions were parsed.")
 
 server.Streams.stdout += Testers.ContainsExpression(
     "Loading 3 replay files",

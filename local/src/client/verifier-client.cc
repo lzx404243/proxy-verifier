@@ -665,8 +665,11 @@ Run_Session(Ssn const &ssn, TargetSelector &target_selector)
     Engine::process_exit_code = 1;
     return;
   }
-  // TODO: maybe send proxy header here
-  session->send_proxy_header(real_target, ssn.pp_version);
+  // send proxy header
+  if (ssn.send_pp_header) {
+    session->send_proxy_header(real_target, ssn.pp_version);
+  }
+
   errata.sink();
   errata.note(session->run_transactions(
       ssn._transactions,

@@ -5,46 +5,57 @@ import time
 # ProxyProtocolCtx is a wrapper around the socket object that is used to append/strip off the proxy protocol header.
 
 PP_V2_PREFIX = b'\x0d\x0a\x0d\x0a\x00\x0d\x0a\x51\x55\x49\x54\x0a'
+# The maximum size of the proxy protocol header is 108 bytes(assuming TLV and
+# linux socket address are not used)
+PP_MAX_DATA_SIZE = 108
 
 
 class SocketFileWrapper(io.RawIOBase):
     def __init__(self, sock, mode, buffering):
         self.file = sock.makefile(mode, buffering)
+        self._check_for_pp_header = True
 
-    def process_proxy_protocol_header_if_present(self, data):
-        # check for proxy protocol header. Some of the code is borrowed from Brian Neradt's proxy_protocol_server in the ats repo
-        print("checking for proxy protocol header")
-        has_pp = False
-        if (len(data) <= 108 and data.startswith(b'PROXY') and b'\r\n' in data):
-            # The spec guarantees that the v1 header will be no more than
-            # 108 bytes.
-            print("Received Proxy Protocol v1")
+    def check_for_proxy_header(self, data):
+        # check for proxy protocol header. Most of the code here is borrowed from Brian Neradt's proxy_protocol_server in ATS repo
+        #print("checking for proxy protocol header")
+        pp_length = 0
+        if (data.startswith(b'PROXY') and b'\r\n' in data):
             pp_length = parse_pp_v1(data)
-            has_pp = True
+            print(f"Received {pp_length} bytes of Proxy Protocol v1")
 
         if data.startswith(PP_V2_PREFIX):
-            print("Received Proxy Protocol v2")
             pp_length = parse_pp_v2(data)
-            has_pp = True
+            print(f"Received {pp_length} bytes of Proxy Protocol v2")
+        return pp_length
 
-        # strip the PROXY header if any and return the remaining data
-        return data[pp_length:] if has_pp else data
+    def read_pp_header_if_present(self):
+        # peek at the file content to check for proxy protocol header
+        print("checking for proxy protocol header")
+        data = self.file.peek(PP_MAX_DATA_SIZE)
+        pp_bytes = self.check_for_proxy_header(data)
+        if pp_bytes > 0:
+            # read the pp header bytes from the file
+            print(f"reading {pp_bytes} bytes from the file")
+            self.file.read(pp_bytes)
+        return
 
     def read(self, size):
-        print("calling the overriden file object read method!")
-        data = self.file.read(size)
+        print("calling read method!")
         # TODO: process proxy protocol header only if the first read
-        data = self.process_proxy_protocol_header_if_present(data)
-        # Your processing logic here
+        if self._check_for_pp_header:
+            self.read_pp_header_if_present()
+            self._check_for_pp_header = False
+        data = self.file.read(size)
+        print(f"data content: {data}")
         return data
 
     def readline(self, size):
-        print("calling the overriden file object readline method!")
-        # Your processing logic here
-        line = self.file.readline(size)
+        print("calling the readline method!")
+        if self._check_for_pp_header:
+            self.read_pp_header_if_present()
+            self._check_for_pp_header = False
         # TODO: process proxy protocol header only if the first read
-        line = self.process_proxy_protocol_header_if_present(line)
-        return line
+        return self.file.readline(size)
 
     def close(self):
         self.file.close()
@@ -67,7 +78,7 @@ class ProxyProtocolCtx(socket.socket):
             self._client_socket = sock
             # for client-side socket, we send the proxy protocol header to the original underlying socket right way.
             # TODO: send the proxy protocol header here
-            send_proxy_header(self._client_socket, proxy_protocol_version=1)
+            #send_proxy_header(self._client_socket, proxy_protocol_version=1)
         return self
 
     def getsockname(
@@ -200,7 +211,7 @@ def parse_pp_v2(pp_bytes: bytes) -> int:
         if tuple_length != 12:
             raise ValueError(
                 "Unexpected tuple length for TCP4/UDP4: "
-                f"{tuple_length} (by spec, should be 12)"
+                f"{tuple_length} (by) spec, should be 12)"
             )
         src_addr = socket.inet_ntop(socket.AF_INET, pp_bytes[:4])
         pp_bytes = pp_bytes[4:]

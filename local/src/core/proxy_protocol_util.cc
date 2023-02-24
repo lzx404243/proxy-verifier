@@ -3,6 +3,7 @@
 #include <codecvt>
 #include <locale>
 #include "swoc/bwf_ex.h"
+#include "swoc/bwf_ip.h"
 
 using swoc::Errata;
 using swoc::TextView;
@@ -109,7 +110,11 @@ ProxyProtocolUtil::construct_v1_header(swoc::BufferWriter &buf) const
       swoc::bwf::If(_src_addr.is_ip6(), "TCP6"),
       _src_addr,
       _dst_addr);
-  errata.note(S_INFO, "construcuting proxy protocol v1 header content {}", buf);
+  errata.note(
+      S_INFO,
+      "construcuting {} bytes of proxy protocol v1 header content {}",
+      buf.size(),
+      buf);
   return errata;
 }
 
@@ -121,9 +126,11 @@ ProxyProtocolUtil::construct_v2_header(swoc::BufferWriter &buf) const
   memcpy(proxy_hdr.v2.sig, V2SIG, sizeof(V2SIG));
   // only support the PROXY command for now
   proxy_hdr.v2.ver_cmd = 0x21;
+  int addr_len = 0;
   if (_src_addr.is_ip4()) {
     proxy_hdr.v2.fam = 0x11;
-    proxy_hdr.v2.len = htons(sizeof(proxy_hdr.v2.addr.ip4));
+    addr_len = sizeof(proxy_hdr.v2.addr.ip4);
+    proxy_hdr.v2.len = htons(addr_len);
     proxy_hdr.v2.addr.ip4.src_addr = _src_addr.sa4.sin_addr.s_addr;
     proxy_hdr.v2.addr.ip4.dst_addr = _dst_addr.sa4.sin_addr.s_addr;
     proxy_hdr.v2.addr.ip4.src_port = _src_addr.network_order_port();
@@ -131,7 +138,8 @@ ProxyProtocolUtil::construct_v2_header(swoc::BufferWriter &buf) const
   } else {
     // ipv6
     proxy_hdr.v2.fam = 0x21;
-    proxy_hdr.v2.len = htons(sizeof(proxy_hdr.v2.addr.ip6));
+    addr_len = sizeof(proxy_hdr.v2.addr.ip6);
+    proxy_hdr.v2.len = htons(addr_len);
     memcpy(
         proxy_hdr.v2.addr.ip6.src_addr,
         reinterpret_cast<const uint8_t *>(&_src_addr.sa6.sin6_addr),
@@ -149,7 +157,9 @@ ProxyProtocolUtil::construct_v2_header(swoc::BufferWriter &buf) const
   //     swoc::bwf::If(_src_addr.is_ip6(), "TCP6"),
   //     _src_addr,
   //     _dst_addr);
-  buf.write(&proxy_hdr, proxy_hdr.v2.len + 16);
-  errata.note(S_INFO, "construcuting proxy protocol v2 header content {}", buf);
+  errata.note(S_DIAG, "writing {} bytes to buf", addr_len + 16);
+  buf.write(&proxy_hdr, addr_len + 16);
+  errata.note(S_INFO, "construcuting {} bytes of proxy protocol v2 header", buf.size());
+  errata.note(S_INFO, "buf content: {:x}", buf);
   return errata;
 }

@@ -919,12 +919,15 @@ Session::send_proxy_header(swoc::IPEndpoint const *real_target, ProxyProtocolVer
   getsockname(_fd, &addr, &len);
   swoc::IPEndpoint source_endpoint{&addr};
   ProxyProtocolUtil ppUtil(source_endpoint, *real_target, pp_version);
-  // make the following this a constant
+  // TODO: make the following this a constant
   constexpr size_t MAX_PP_HDR_SIZE = 108;
   swoc::LocalBufferWriter<MAX_PP_HDR_SIZE> w;
-  ppUtil.serialize(w);
-  errata.note(S_DIAG, "Sending PROXY header from {} to {}", source_endpoint, *real_target);
+  auto pp_serialize_errata = ppUtil.serialize(w);
+  errata.note(std::move(pp_serialize_errata));
   // send the textview containing the data
+  errata.note(S_DIAG, "Sending PROXY header from {} to {}", source_endpoint, *real_target);
+  // write to socket
+  write(w.view());
   return errata;
 }
 
