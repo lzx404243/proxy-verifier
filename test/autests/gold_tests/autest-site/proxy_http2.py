@@ -20,6 +20,7 @@ import threading
 import traceback
 
 from proxy_http1 import ProxyRequestHandler
+import proxy_protocol_context
 
 import eventlet
 from eventlet.green.OpenSSL import SSL, crypto
@@ -47,8 +48,20 @@ class WrapSSSLContext(ssl.SSLContext):
         self._server_hostname = server_hostname
 
     def wrap_socket(self, sock, *args, **kwargs):
-        kwargs['server_hostname'] = self._server_hostname
-        return super().wrap_socket(sock, *args, **kwargs)
+        #kwargs['server_hostname'] = self._server_hostname
+        # return super().wrap_socket(sock, *args, **kwargs)
+
+        # add server_hostname to kwargs
+        pp_context = proxy_protocol_context.ProxyProtocolCtx(
+            server_side=False)
+        # wrap the socket with proxy protocol socket first. This ensures that the proxy protocol is sent unencrypted
+        print("wrapping original socket with proxy protocol")
+        pp_sock = pp_context.wrap_socket(sock)
+        if self._server_hostname:
+            kwargs['server_hostname'] = self._server_hostname
+        print("wrapping proxy protocol socket with ssl socket")
+        ssl_sock = super().wrap_socket(pp_sock, *args, **kwargs)
+        return ssl_sock
 
 
 class RequestInfo(object):
@@ -65,7 +78,8 @@ class Http2ConnectionManager(object):
     """
 
     def __init__(self, sock, h2_to_server=False):
-        listening_config = H2Configuration(client_side=False, validate_inbound_headers=False)
+        listening_config = H2Configuration(
+            client_side=False, validate_inbound_headers=False)
         self.tls = threading.local()
         self.tls.http_conns = {}
         self.sock = sock
@@ -103,8 +117,10 @@ class Http2ConnectionManager(object):
                 for stream_id in resp_from_server.keys():
                     response_headers, response_body = resp_from_server[stream_id]
                     try:
-                        self.listening_conn.send_headers(stream_id, response_headers)
-                        self.listening_conn.send_data(stream_id, response_body, end_stream=True)
+                        self.listening_conn.send_headers(
+                            stream_id, response_headers)
+                        self.listening_conn.send_data(
+                            stream_id, response_body, end_stream=True)
                     except StreamClosedError as e:
                         print(e)
                     except StreamIDTooLowError as e:
@@ -210,7 +226,8 @@ class Http2ConnectionManager(object):
         if not isinstance(request_headers, HttpHeaders):
             request_headers_message = HttpHeaders()
             for name, value in request_headers:
-                request_headers_message.add_header(name.decode("utf-8"), value.decode("utf-8"))
+                request_headers_message.add_header(
+                    name.decode("utf-8"), value.decode("utf-8"))
             request_headers = request_headers_message
         request_headers = ProxyRequestHandler.filter_headers(request_headers)
 
@@ -291,7 +308,8 @@ class Http2ConnectionManager(object):
 
         request_headers_message = HttpHeaders()
         for name, value in request_headers:
-            request_headers_message.add_header(name.decode("utf-8"), value.decode("utf-8"))
+            request_headers_message.add_header(
+                name.decode("utf-8"), value.decode("utf-8"))
         request_headers = request_headers_message
         request_headers = ProxyRequestHandler.filter_headers(request_headers)
 
@@ -307,9 +325,11 @@ class Http2ConnectionManager(object):
         try:
             origin = (scheme, replay_server, self.client_sni)
             if origin not in self.tls.http_conns:
-                ssl_context = httpx.create_ssl_context(cert=self.cert_file, verify=False)
+                ssl_context = httpx.create_ssl_context(
+                    cert=self.cert_file, verify=False)
                 if self.client_sni:
-                    setattr(ssl_context, "old_wrap_socket", ssl_context.wrap_socket)
+                    setattr(ssl_context, "old_wrap_socket",
+                            ssl_context.wrap_socket)
 
                     def new_wrap_socket(sock, *args, **kwargs):
                         kwargs['server_hostname'] = self.client_sni
