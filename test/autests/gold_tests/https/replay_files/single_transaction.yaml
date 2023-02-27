@@ -3,7 +3,7 @@ meta:
   version: '1.0'
 
 sessions:
-- protocol: [ {name: http, version: 1.1}, {name: tls, sni: test_sni}, {name: tcp}, {name: ip} ]
+- protocol: [ {name: http, version: 1.1}, {name: tls, sni: test_sni}, {name: tcp}, {name: ip}, {name: proxy-protocol, version: 2} ]
   transactions:
 
   - client-request:

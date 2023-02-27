@@ -50,6 +50,8 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
     in DirectiveEngine for how these directives work.
     """
     timeout = 5
+    # This is required to hack around and allow the socketserver to use our custom function to create the wfile
+    wbufsize = -1
     # For serializing output. See the uses of "with lock".
     lock = threading.Lock()
 
@@ -349,14 +351,18 @@ def configure_http1_server(HandlerClass, ServerClass, protocol,
     HandlerClass.server_port = server_port
     HandlerClass.cert_file = https_pem
     httpd = ServerClass(listen_address, HandlerClass)
+    client_to_proxy_context = None
+    use_ssl = False
     if https_pem:
         client_to_proxy_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         client_to_proxy_context.load_cert_chain(certfile=https_pem)
         client_to_proxy_context.set_servername_callback(servername_callback)
-        httpd.socket = client_to_proxy_context.wrap_socket(
-            httpd.socket, server_side=True)
+        use_ssl = True
+        # httpd.socket = client_to_proxy_context.wrap_socket(
+        #     httpd.socket, server_side=True)
     # wrap the socket with proxy protocol socket
-    pp_context = proxy_protocol_context.ProxyProtocolCtx(server_side=True)
+    pp_context = proxy_protocol_context.ProxyProtocolCtx(
+        server_side=True, client_sock=None, use_ssl=use_ssl, ssl_ctx=client_to_proxy_context)
     # print("wrapping socket with proxy protocol")
     httpd.socket = pp_context.wrap_socket(httpd.socket)
     print(f'httpd type is {type(httpd)}')

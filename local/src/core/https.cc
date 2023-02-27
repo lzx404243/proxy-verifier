@@ -266,7 +266,6 @@ TLSSession::write(TextView view)
 {
   TextView remaining = view;
   swoc::Rv<ssize_t> num_written = 0;
-  num_written.note(S_DIAG, "SSL_write attempt");
   static int write_count = 0;
   ++write_count;
   while (!remaining.empty()) {

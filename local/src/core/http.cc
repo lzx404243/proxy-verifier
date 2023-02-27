@@ -1701,6 +1701,13 @@ Session::do_connect(TextView interface, swoc::IPEndpoint const *real_target)
           static const int ONE = 1;
           setsockopt(socket_fd, IPPROTO_TCP, TCP_NODELAY, &ONE, sizeof(ONE));
           if (0 == ::fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK)) {
+            // if (ssn.send_pp_header) {
+            // TODO: may instead need to send PROXY protocol here...
+            // TODO: change the hard code value
+            // TODO: the sleep is a hack to allow the client to conduct SSL handshake later. Without
+            // it the client will timeout and close the connection.
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            send_proxy_header(real_target, ProxyProtocolVersion::V1);
             errata.note(this->connect());
           } else {
             errata.note(

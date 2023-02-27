@@ -2,6 +2,7 @@ import socket
 import io
 import struct
 import time
+import ssl
 # ProxyProtocolCtx is a wrapper around the socket object that is used to append/strip off the proxy protocol header.
 
 PP_V2_PREFIX = b'\x0d\x0a\x0d\x0a\x00\x0d\x0a\x51\x55\x49\x54\x0a'
@@ -11,9 +12,16 @@ PP_MAX_DATA_SIZE = 108
 
 
 class SocketFileWrapper(io.RawIOBase):
-    def __init__(self, sock, mode, buffering):
+    def __init__(self, sock, mode, buffering, use_ssl=False, ssl_ctx=None, server_side=False):
+        self.sock = sock
         self.file = sock.makefile(mode, buffering)
+        self._buffering = buffering
+        self._file_mode = mode
         self._check_for_pp_header = True
+        self._is_server_side = server_side
+        self._use_ssl = use_ssl
+        self._ssl_ctx = ssl_ctx
+        self.paired_wfile = None
 
     def check_for_proxy_header(self, data):
         # check for proxy protocol header. Most of the code here is borrowed from Brian Neradt's proxy_protocol_server in ATS repo
@@ -41,10 +49,14 @@ class SocketFileWrapper(io.RawIOBase):
 
     def read(self, size):
         print("calling read method!")
-        # TODO: process proxy protocol header only if the first read
         if self._check_for_pp_header:
+            # happens only once
             self.read_pp_header_if_present()
             self._check_for_pp_header = False
+            if self._use_ssl and self.is_server_side:
+                print("wrapping the socket with ssl")
+                self.wrapSSL(self._ssl_ctx)
+                print("done SSL wrapping!")
         data = self.file.read(size)
         print(f"data content: {data}")
         return data
@@ -52,10 +64,32 @@ class SocketFileWrapper(io.RawIOBase):
     def readline(self, size):
         print("calling the readline method!")
         if self._check_for_pp_header:
+            # happens only once
             self.read_pp_header_if_present()
             self._check_for_pp_header = False
-        # TODO: process proxy protocol header only if the first read
-        return self.file.readline(size)
+            if self._use_ssl:
+                print("wrapping the socket with ssl")
+                self.wrapSSL()
+                print("done SSL wrapping!")
+        # print("printing out stuff")
+        # data = self.file.peek(100000)
+        # print(f"peeked data: {data}")
+        data = self.file.readline(size)
+        print(f"data content: {data}")
+        return data
+
+    def wrapSSL(self):
+        self.sock = self._ssl_ctx.wrap_socket(
+            self.sock, server_side=True)
+        # TODO: double check the file mode and buffering mode
+        print("updating the new file objects")
+        self.file = self.sock.makefile(self._file_mode, self._buffering)
+        self.paired_wfile.sock = self.sock
+        self.paired_wfile.file = self.sock.makefile('wb', self._buffering)
+
+    def write(self, b):
+        return self.sock.sendall(b)
+        # return self.file.write(b)
 
     def close(self):
         self.file.close()
@@ -63,11 +97,15 @@ class SocketFileWrapper(io.RawIOBase):
 
 
 class ProxyProtocolCtx(socket.socket):
-    def __init__(self, server_side, client_sock=None):
+    def __init__(self, server_side, client_sock=None, use_ssl=False, ssl_ctx=None):
         self._socket = None
         self._client_socket = client_sock
         self._server_side = server_side
         self._done_pp_processing = False
+        self._use_ssl = use_ssl
+        self._ssl_ctx = ssl_ctx
+        self.rfile = None
+        self.wfile = None
         super().__init__()
 
     def wrap_socket(self, sock):
@@ -93,7 +131,7 @@ class ProxyProtocolCtx(socket.socket):
         print("calling the overridden accept method")
         client_sock, client_addr = self._socket.accept()
         # TODO: create a new ProxyProtocolCtx object here. see if there is a better way to do this
-        return ProxyProtocolCtx(server_side=True, client_sock=client_sock), client_addr
+        return ProxyProtocolCtx(server_side=True, client_sock=client_sock, use_ssl=self._use_ssl, ssl_ctx=self._ssl_ctx), client_addr
 
     def create_connection(address, timeout, source_address):
         raise NotImplementedError("create_connection is not implemented")
@@ -110,14 +148,23 @@ class ProxyProtocolCtx(socket.socket):
 
     def sendall(self, data):
         print("calling the overridden sendall method")
-        if not self._server_side:
-            print("appending the proxy protocol header")
-
         return self._client_socket.sendall(data)
 
     def makefile(self, mode="r", buffering=None):
         print("proxy ctx makefile is called")
-        return SocketFileWrapper(self._client_socket, mode, buffering)
+        if 'r' in mode:
+            print("creating the rfile")
+            self.rfile = SocketFileWrapper(
+                self._client_socket, mode, buffering, self._use_ssl, self._ssl_ctx, self._server_side)
+            return self.rfile
+        elif 'w' in mode:
+            print("creating the wfile")
+            self.wfile = SocketFileWrapper(
+                self._client_socket, mode, buffering, self._use_ssl, self._ssl_ctx, self._server_side)
+            if self.rfile:
+                print("assigning the paired wfile in the rfile")
+                self.rfile.paired_wfile = self.wfile
+            return self.wfile
 
     def shutdown(self, how):
         return self._client_socket.shutdown(how)
