@@ -332,8 +332,18 @@ class Http2ConnectionManager(object):
                             ssl_context.wrap_socket)
 
                     def new_wrap_socket(sock, *args, **kwargs):
+                        #kwargs['server_hostname'] = self.client_sni
+                        # return ssl_context.old_wrap_socket(sock, *args, **kwargs)
+                        pp_context = proxy_protocol_context.ProxyProtocolCtx(
+                            server_side=False)
+                        # wrap the socket with proxy protocol socket first. This ensures that the proxy protocol is sent unencrypted
+                        print("wrapping original socket with proxy protocol")
+                        pp_sock = pp_context.wrap_socket(sock)
                         kwargs['server_hostname'] = self.client_sni
-                        return ssl_context.old_wrap_socket(sock, *args, **kwargs)
+                        print("wrapping proxy protocol socket with ssl socket")
+                        ssl_sock = ssl_context.old_wrap_socket(
+                            pp_sock, *args, **kwargs)
+                        return ssl_sock
                     setattr(ssl_context, "wrap_socket", new_wrap_socket)
 
                 http2_connection = httpx.Client(
