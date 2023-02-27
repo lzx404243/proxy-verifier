@@ -284,7 +284,6 @@ ClientReplayFileHandler::ssn_open(YAML::Node const &node)
     }
     if (pp_node.result().IsDefined()) {
       errata.note(S_DIAG, "Enabling proxy protocol for this session.");
-      _ssn->send_pp_header = true;
       // set proxy protocol header version if specified
       auto const &pp_version_node = pp_node.result()[YAML_SSN_PROTOCOL_VERSION];
       // for unspecified or unknown versions, default to v1
@@ -660,7 +659,7 @@ Run_Session(Ssn const &ssn, TargetSelector &target_selector)
   }
   errata.sink();
 
-  errata.note(session->do_connect(specified_interface, real_target));
+  errata.note(session->do_connect(specified_interface, real_target, ssn.pp_version));
   if (!errata.is_ok()) {
     Engine::process_exit_code = 1;
     return;

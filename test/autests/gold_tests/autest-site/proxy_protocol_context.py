@@ -126,6 +126,7 @@ class ProxyProtocolCtx(socket.socket):
         client_sock, client_addr = self._socket.accept()
         read_pp_header_if_present(client_sock)
         # TODO: create a new ProxyProtocolCtx object here. see if there is a better way to do this
+        # TODO: if we got pp, set the version that is going to be sent to the server
 
         # TODO: think about whether we can consolidate the logic here with the logic in accept, removing the wfile and rfile and stuff, since we don't need control beyond this point
 
@@ -161,7 +162,9 @@ class ProxyProtocolCtx(socket.socket):
         return self._client_socket.shutdown(how)
 
     def close(self):
-        return self._client_socket.close()
+        if self._client_socket:
+            return self._client_socket.close()
+        return None
 
     def detach(self):
         """detach() -> file descriptor

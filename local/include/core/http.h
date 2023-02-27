@@ -620,8 +620,7 @@ struct Ssn
   bool is_tls = false;
   bool is_h2 = false;
   bool is_h3 = false;
-  bool send_pp_header = false;
-  ProxyProtocolVersion pp_version;
+  ProxyProtocolVersion pp_version = ProxyProtocolVersion::NONE;
 
   swoc::Errata post_process_transactions();
 };
@@ -715,7 +714,10 @@ public:
       swoc::TextView bytes_read,
       std::shared_ptr<RuleCheck> rule_check = nullptr);
 
-  virtual swoc::Errata do_connect(swoc::TextView interface, swoc::IPEndpoint const *real_target);
+  virtual swoc::Errata do_connect(
+      swoc::TextView interface,
+      swoc::IPEndpoint const *real_target,
+      ProxyProtocolVersion pp_version = ProxyProtocolVersion::NONE);
 
   /** Write the content in data to the socket.
    *
