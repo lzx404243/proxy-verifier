@@ -12,6 +12,8 @@ PP_MAX_DATA_SIZE = 108
 
 
 class SocketFileWrapper(io.RawIOBase):
+    # This class is a wrapper around the socket object that is used to append/strip off the proxy protocol header. This is needed as the the xxx class which the tests use used the file abstraction to read and write data, instead of using the standard socket API such as send(), recv(). This is a read/write file-like object. The write is unbuffered just as the default impletation in SocketServer.py
+
     def __init__(self, sock, mode, buffering, use_ssl=False, ssl_ctx=None, server_side=False):
         self.sock = sock
         self.file = sock.makefile(mode, buffering)
@@ -21,7 +23,6 @@ class SocketFileWrapper(io.RawIOBase):
         self._is_server_side = server_side
         self._use_ssl = use_ssl
         self._ssl_ctx = ssl_ctx
-        self.paired_wfile = None
 
     def check_for_proxy_header(self, data):
         # check for proxy protocol header. Most of the code here is borrowed from Brian Neradt's proxy_protocol_server in ATS repo
@@ -71,9 +72,6 @@ class SocketFileWrapper(io.RawIOBase):
                 print("wrapping the socket with ssl")
                 self.wrapSSL()
                 print("done SSL wrapping!")
-        # print("printing out stuff")
-        # data = self.file.peek(100000)
-        # print(f"peeked data: {data}")
         data = self.file.readline(size)
         print(f"data content: {data}")
         return data
@@ -84,16 +82,13 @@ class SocketFileWrapper(io.RawIOBase):
         # TODO: double check the file mode and buffering mode
         print("updating the new file objects")
         self.file = self.sock.makefile(self._file_mode, self._buffering)
-        self.paired_wfile.sock = self.sock
-        self.paired_wfile.file = self.sock.makefile('wb', self._buffering)
 
     def write(self, b):
+        # send those out immediately as the original implementation does unbuffered write by default anyway
         return self.sock.sendall(b)
-        # return self.file.write(b)
 
     def close(self):
         self.file.close()
-    # TODO: check write logic also
 
 
 class ProxyProtocolCtx(socket.socket):
@@ -104,8 +99,7 @@ class ProxyProtocolCtx(socket.socket):
         self._done_pp_processing = False
         self._use_ssl = use_ssl
         self._ssl_ctx = ssl_ctx
-        self.rfile = None
-        self.wfile = None
+        self.rwfile = None
         super().__init__()
 
     def wrap_socket(self, sock):
@@ -152,19 +146,12 @@ class ProxyProtocolCtx(socket.socket):
 
     def makefile(self, mode="r", buffering=None):
         print("proxy ctx makefile is called")
-        if 'r' in mode:
-            print("creating the rfile")
-            self.rfile = SocketFileWrapper(
-                self._client_socket, mode, buffering, self._use_ssl, self._ssl_ctx, self._server_side)
-            return self.rfile
-        elif 'w' in mode:
-            print("creating the wfile")
-            self.wfile = SocketFileWrapper(
-                self._client_socket, mode, buffering, self._use_ssl, self._ssl_ctx, self._server_side)
-            if self.rfile:
-                print("assigning the paired wfile in the rfile")
-                self.rfile.paired_wfile = self.wfile
-            return self.wfile
+        if self.rwfile:
+            return self.rwfile
+        print("creating a new SocketFileWrapper")
+        self.rwfile = SocketFileWrapper(
+            self._client_socket, mode, buffering, self._use_ssl, self._ssl_ctx, self._server_side)
+        return self.rwfile
 
     def shutdown(self, how):
         return self._client_socket.shutdown(how)
