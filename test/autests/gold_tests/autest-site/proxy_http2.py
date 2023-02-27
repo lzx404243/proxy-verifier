@@ -487,7 +487,15 @@ def configure_http2_server(listen_port, server_port, https_pem, ca_pem, h2_to_se
     context.set_tmp_ecdh(crypto.get_elliptic_curve('prime256v1'))
 
     server = eventlet.listen(('0.0.0.0', listen_port))
+
+    # initial_accept()
+
+    pp_context = proxy_protocol_context.ProxyProtocolCtx(
+        server_side=True, client_sock=None, use_ssl=False, ssl_ctx=None)
+    print("wrapping socket with proxy protocol")
+    server = pp_context.wrap_socket(server)
     server = SSL.Connection(context, server)
+
     server_side_proto = "HTTP/2" if h2_to_server else "HTTP/1.x"
     print(f"Serving HTTP/2 Proxy on 127.0.0.1:{listen_port} with pem "
           f"'{https_pem}', forwarding to 127.0.0.1:{server_port} via "

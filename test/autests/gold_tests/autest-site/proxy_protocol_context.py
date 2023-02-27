@@ -124,7 +124,11 @@ class ProxyProtocolCtx(socket.socket):
     def accept(self):
         print("calling the overridden accept method")
         client_sock, client_addr = self._socket.accept()
+        read_pp_header_if_present(client_sock)
         # TODO: create a new ProxyProtocolCtx object here. see if there is a better way to do this
+
+        # TODO: think about whether we can consolidate the logic here with the logic in accept, removing the wfile and rfile and stuff, since we don't need control beyond this point
+
         return ProxyProtocolCtx(server_side=True, client_sock=client_sock, use_ssl=self._use_ssl, ssl_ctx=self._ssl_ctx), client_addr
 
     def create_connection(address, timeout, source_address):
@@ -299,3 +303,29 @@ def send_proxy_header(sock, proxy_protocol_version):
     sock.sendall(proxy_header_data)
     # TODO: may be reduce or remove
     time.sleep(1)
+
+
+def read_pp_header_if_present(sock):
+    # peek at the file content to check for proxy protocol header
+    print("checking for proxy protocol header")
+    data = sock.recv(PP_MAX_DATA_SIZE, socket.MSG_PEEK)
+    pp_bytes = check_for_proxy_header(data)
+    if pp_bytes > 0:
+        # read the pp header bytes from the file
+        print(f"reading {pp_bytes} bytes from the file")
+        sock.recv(pp_bytes)
+    return
+
+
+def check_for_proxy_header(data):
+    # check for proxy protocol header. Most of the code here is borrowed from Brian Neradt's proxy_protocol_server in ATS repo
+    print("checking for proxy protocol header")
+    pp_length = 0
+    if (data.startswith(b'PROXY') and b'\r\n' in data):
+        pp_length = parse_pp_v1(data)
+        print(f"Received {pp_length} bytes of Proxy Protocol v1")
+
+    if data.startswith(PP_V2_PREFIX):
+        pp_length = parse_pp_v2(data)
+        print(f"Received {pp_length} bytes of Proxy Protocol v2")
+    return pp_length
