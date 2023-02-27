@@ -77,8 +77,8 @@ class ProxyProtocolCtx(socket.socket):
         if not self._server_side:
             self._client_socket = sock
             # for client-side socket, we send the proxy protocol header to the original underlying socket right way.
-            # TODO: send the proxy protocol header here
-            #send_proxy_header(self._client_socket, proxy_protocol_version=1)
+            # TODO: have a flag to control this behavior. The flag should be set to true if the proxy protocol header is received by the proxy
+            send_proxy_header(self._client_socket, proxy_protocol_version=1)
         return self
 
     def getsockname(

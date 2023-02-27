@@ -872,6 +872,7 @@ swoc::Rv<ssize_t>
 Session::write(TextView view)
 {
   swoc::Rv<ssize_t> zret{0};
+  zret.note(S_DIAG, "plaintext write attempt.");
   TextView remaining = view;
   while (!remaining.empty()) {
     if (this->is_closed()) {
@@ -927,7 +928,7 @@ Session::send_proxy_header(swoc::IPEndpoint const *real_target, ProxyProtocolVer
   // send the textview containing the data
   errata.note(S_DIAG, "Sending PROXY header from {} to {}", source_endpoint, *real_target);
   // write to socket
-  write(w.view());
+  Session::write(w.view());
   return errata;
 }
 
