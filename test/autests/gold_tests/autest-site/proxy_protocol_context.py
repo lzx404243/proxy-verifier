@@ -18,8 +18,8 @@ class ProxyProtocolVersion(Enum):
 
 
 class ProxyProtocolUtil:
-    # Proxy header version to be sent to the origin server. This is set when a
-    # PROXY header is received. Needs to be thread-local as connection can be
+    # The Proxy header version to be sent to the origin server. This is set when
+    # a PROXY header is received. Needs to be thread-local as connections can be
     # concurrent
     pp_version = threading.local()
 
@@ -59,7 +59,7 @@ class ProxyProtocolUtil:
         tuple_length = int.from_bytes(pp_bytes[:2], byteorder='big')
         pp_bytes = pp_bytes[2:]
 
-        # Of version_command, the highest 4 bits is the version and the lowest
+        # Of version_command, the higher 4 bits is the version and the lower 4
         # is the command.
         version = version_command >> 4
         command = version_command & 0x0F
@@ -76,8 +76,8 @@ class ProxyProtocolUtil:
             raise ValueError(
                 f'Invalid command: {command} (by spec, should be 0x00 or 0x01)')
 
-        # Of address_family, the highest 4 bits is the address family and the
-        # lowest is the transport protocol.
+        # Of address_family, the higher 4 bits is the address family and the
+        # lower 4 is the transport protocol.
         if family_protocol == 0x0:
             transport_protocol_description = 'UNSPEC'
         elif family_protocol == 0x11:
@@ -118,8 +118,6 @@ class ProxyProtocolUtil:
             f'{tuple_description}')
 
         return 16 + tuple_length
-
-    # TODO: correct PROXY protocol format to include IP protocol version
 
     @staticmethod
     def construct_proxy_header_v1(src_addr, dst_addr, family):
@@ -200,57 +198,20 @@ class PP_socket(socket.socket):
         self._ssl_ctx = ssl_ctx
         super().__init__()
 
-    def getsockname(
-        self, *args, **kwargs): return self._socket.getsockname(*args, **kwargs)
+    def getsockname(self, *args, **kwargs):
+        return self._socket.getsockname(*args, **kwargs)
 
     def fileno(self):
-        print("calling the overridden fileno method")
         return self._socket.fileno()
 
     def accept(self):
         print("calling the overridden accept method")
         client_sock, client_addr = self._socket.accept()
         ProxyProtocolUtil.read_pp_header_if_present(client_sock)
-        # TODO: if we got pp, set the version that is going to be sent to the server
         if self._use_ssl:
             print("wrapping the socket with ssl")
             client_sock = self._ssl_ctx.wrap_socket(
                 client_sock, server_side=True)
-        # Returning the raw client socket at this point, since we are done with proxy protocol processing and yield control beyond this point
+        # Returning the accepted client socket here, since we are done with
+        # proxy protocol processing and can yield control beyond this point
         return client_sock, client_addr
-
-    def create_connection(address, timeout, source_address):
-        raise NotImplementedError("create_connection is not implemented")
-
-    def send(self, data):
-        raise NotImplementedError("send is not implemented")
-        # print("calling the overridden send method")
-        # return self._socket.send(data)
-
-    def recv(self, size):
-        raise NotImplementedError("recv is not implemented")
-        # print("calling the overridden recv method")
-        # return self._socket.recv(size)
-
-    def sendall(self, data):
-        raise NotImplementedError("sendall is not implemented")
-        print("calling the overridden sendall method")
-        return self._client_socket.sendall(data)
-
-    def shutdown(self, how):
-        return self._socket.shutdown(how)
-
-    def close(self):
-        return self._socket.close()
-
-    def detach(self):
-        """detach() -> file descriptor
-        Close the socket object without closing the underlying file descriptor.
-        The object cannot be used after this call, but the file descriptor
-        can be reused for other purposes.  The file descriptor is returned.
-        """
-        self._closed = True
-        detached_fd = super().detach()
-        if self._socket is not None:
-            return self._client_socket.detach()
-        return detached_fd

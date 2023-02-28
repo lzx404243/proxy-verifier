@@ -67,7 +67,6 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         self.log_message(fmt, *args)
 
     def do_GET(self):
-        print('entering the handler!!')
         req = self
         content_length = int(req.headers.get('Content-Length', 0))
         req_body = b''
