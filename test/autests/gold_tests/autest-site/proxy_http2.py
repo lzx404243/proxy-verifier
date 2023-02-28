@@ -48,20 +48,12 @@ class WrapSSSLContext(ssl.SSLContext):
         self._server_hostname = server_hostname
 
     def wrap_socket(self, sock, *args, **kwargs):
-        #kwargs['server_hostname'] = self._server_hostname
-        # return super().wrap_socket(sock, *args, **kwargs)
-
-        # add server_hostname to kwargs
-        pp_context = proxy_protocol_context.ProxyProtocolCtx(
-            server_side=False)
-        # wrap the socket with proxy protocol socket first. This ensures that the proxy protocol is sent unencrypted
-        print("wrapping original socket with proxy protocol")
-        pp_sock = pp_context.wrap_socket(sock)
-        if self._server_hostname:
-            kwargs['server_hostname'] = self._server_hostname
-        print("wrapping proxy protocol socket with ssl socket")
-        ssl_sock = super().wrap_socket(pp_sock, *args, **kwargs)
-        return ssl_sock
+        # send proxy protocol header first
+        # TODO: make this configurable and conditionally, the version
+        proxy_protocol_context.send_proxy_header(
+            sock, proxy_protocol_version=1)
+        kwargs['server_hostname'] = self._server_hostname
+        return super().wrap_socket(sock, *args, **kwargs)
 
 
 class RequestInfo(object):
@@ -332,18 +324,12 @@ class Http2ConnectionManager(object):
                             ssl_context.wrap_socket)
 
                     def new_wrap_socket(sock, *args, **kwargs):
-                        #kwargs['server_hostname'] = self.client_sni
-                        # return ssl_context.old_wrap_socket(sock, *args, **kwargs)
-                        pp_context = proxy_protocol_context.ProxyProtocolCtx(
-                            server_side=False)
-                        # wrap the socket with proxy protocol socket first. This ensures that the proxy protocol is sent unencrypted
-                        print("wrapping original socket with proxy protocol")
-                        pp_sock = pp_context.wrap_socket(sock)
+                        # send proxy protocol header first
+                        # TODO: make this configurable and conditionally, the version
+                        proxy_protocol_context.send_proxy_header(
+                            sock, proxy_protocol_version=1)
                         kwargs['server_hostname'] = self.client_sni
-                        print("wrapping proxy protocol socket with ssl socket")
-                        ssl_sock = ssl_context.old_wrap_socket(
-                            pp_sock, *args, **kwargs)
-                        return ssl_sock
+                        return ssl_context.old_wrap_socket(sock, *args, **kwargs)
                     setattr(ssl_context, "wrap_socket", new_wrap_socket)
 
                 http2_connection = httpx.Client(
