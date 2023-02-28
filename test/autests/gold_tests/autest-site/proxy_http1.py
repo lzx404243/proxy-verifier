@@ -121,44 +121,41 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             origin = (scheme, replay_server)
             if origin not in self.tls.conns:
                 if scheme == 'https':
-                    class WrapSSSLContext(ssl.SSLContext):
-                        '''
-                        HTTPSConnection provides no way to specify the
-                        server_hostname in the underlying socket. We
-                        accomplish this by wrapping the context to
-                        overrride the wrap_socket behavior (called later
-                        by HTTPSConnection) to specify the
-                        server_hostname that we want.
-                        '''
-                        def __new__(cls, server_hostname, *args, **kwargs):
-                            return super().__new__(cls, *args, *kwargs)
+                    if client_sni:
 
-                        def __init__(self, server_hostname, *args, **kwargs):
-                            super().__init__(*args, **kwargs)
-                            self._server_hostname = server_hostname
+                        class WrapSSSLContext(ssl.SSLContext):
+                            '''
+                            HTTPSConnection provides no way to specify the
+                            server_hostname in the underlying socket. We
+                            accomplish this by wrapping the context to
+                            overrride the wrap_socket behavior (called later
+                            by HTTPSConnection) to specify the
+                            server_hostname that we want.
+                            '''
+                            def __new__(cls, server_hostname, *args, **kwargs):
+                                return super().__new__(cls, *args, *kwargs)
 
-                        def wrap_socket(self, sock, *args, **kwargs):
-                            # add server_hostname to kwargs
-                            pp_context = proxy_protocol_context.ProxyProtocolCtx(
-                                server_side=False)
-                            # wrap the socket with proxy protocol socket first. This ensures that the proxy protocol is sent unencrypted
-                            print("wrapping original socket with proxy protocol")
-                            pp_sock = pp_context.wrap_socket(sock)
-                            if self._server_hostname:
+                            def __init__(self, server_hostname, *args, **kwargs):
+                                super().__init__(*args, **kwargs)
+                                self._server_hostname = server_hostname
+
+                            def wrap_socket(self, sock, *args, **kwargs):
                                 kwargs['server_hostname'] = self._server_hostname
-                            print("wrapping proxy protocol socket with ssl socket")
-                            ssl_sock = super().wrap_socket(pp_sock, *args, **kwargs)
-                            return ssl_sock
-                    proxy_to_server_context = WrapSSSLContext(client_sni)
+                                return super().wrap_socket(sock, *args, **kwargs)
+
+                        proxy_to_server_context = WrapSSSLContext(client_sni)
+                    else:
+                        proxy_to_server_context = ssl.SSLContext()
                     self.tls.conns[origin] = http.client.HTTPSConnection(
                         replay_server, timeout=self.timeout,
                         context=proxy_to_server_context, cert_file=self.cert_file)
                 else:
                     self.tls.conns[origin] = http.client.HTTPConnection(
                         replay_server, timeout=self.timeout)
-                    # wrap_create_connection
-                    self.tls.conns[origin]._create_connection = proxy_protocol_context.create_connection_and_send_pp
-                    # for http, monkey patch the create_connection method so that the proxy protocol socket is used
+
+            # wrap_create_connection.  here, we monkey patch the
+            # create_connection method so that the proxy protocol is sent as the connection is established
+            self.tls.conns[origin]._create_connection = proxy_protocol_context.create_connection_and_send_pp
             conn = self.tls.conns[origin]
 
             if 'transfer-encoding' in req.headers and req.headers['transfer-encoding'] == 'chunked':
