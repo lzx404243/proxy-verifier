@@ -20,7 +20,7 @@ import threading
 import traceback
 
 from proxy_http1 import ProxyRequestHandler
-import proxy_protocol_context
+from proxy_protocol_context import ProxyProtocolUtil
 
 import eventlet
 from eventlet.green.OpenSSL import SSL, crypto
@@ -48,10 +48,9 @@ class WrapSSSLContext(ssl.SSLContext):
         self._server_hostname = server_hostname
 
     def wrap_socket(self, sock, *args, **kwargs):
-        # send proxy protocol header first
-        # TODO: make this configurable and conditionally, the version
-        proxy_protocol_context.send_proxy_header(
-            sock, proxy_protocol_version=1)
+        # send proxy protocol header first before TLS handshake
+        ProxyProtocolUtil.send_proxy_header(
+            sock, ProxyProtocolUtil.pp_version)
         kwargs['server_hostname'] = self._server_hostname
         return super().wrap_socket(sock, *args, **kwargs)
 
@@ -324,10 +323,9 @@ class Http2ConnectionManager(object):
                             ssl_context.wrap_socket)
 
                     def new_wrap_socket(sock, *args, **kwargs):
-                        # send proxy protocol header first
-                        # TODO: make this configurable and conditionally, the version
-                        proxy_protocol_context.send_proxy_header(
-                            sock, proxy_protocol_version=1)
+                        # send proxy protocol header first before TLS handshake
+                        ProxyProtocolUtil.send_proxy_header(
+                            sock, ProxyProtocolUtil.pp_version)
                         kwargs['server_hostname'] = self.client_sni
                         return ssl_context.old_wrap_socket(sock, *args, **kwargs)
                     setattr(ssl_context, "wrap_socket", new_wrap_socket)
@@ -474,12 +472,10 @@ def configure_http2_server(listen_port, server_port, https_pem, ca_pem, h2_to_se
 
     server = eventlet.listen(('0.0.0.0', listen_port))
 
-    # initial_accept()
-
-    pp_context = proxy_protocol_context.ProxyProtocolCtx(
-        server_side=True, client_sock=None, use_ssl=False, ssl_ctx=None)
     print("wrapping socket with proxy protocol")
-    server = pp_context.wrap_socket(server)
+    # wrap the socket with proxy protocol socket. Here we don't pass in the SSL
+    # info as SSL stuff will be taken care later in SSL.Connection()
+    server = ProxyProtocolUtil.wrap_socket(server)
     server = SSL.Connection(context, server)
 
     server_side_proto = "HTTP/2" if h2_to_server else "HTTP/1.x"
