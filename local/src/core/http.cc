@@ -93,7 +93,7 @@ bwformat(BufferWriter &w, bwf::Spec const & /*spec*/, ProxyProtocolUtil const &h
     w.print("{}", swoc::TextView(h._hdr->v1.line).prefix_at('\0'));
   } else {
     // v2 header
-    // TODO: use the swoc::lexicon to print the transport description(refer to H2FrameNames)
+    // TODO: print family names. also, remove the _hdr
     IPAddr src_addr(reinterpret_cast<in_addr_t>(ntohl(h._hdr->v2.addr.ip4.src_addr)));
     IPAddr dst_addr(reinterpret_cast<in_addr_t>(ntohl(h._hdr->v2.addr.ip4.dst_addr)));
     IPEndpoint src_ep, dst_ep;
