@@ -154,21 +154,10 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                         replay_server, timeout=self.timeout,
                         context=proxy_to_server_context, cert_file=self.cert_file)
                 else:
-                    def wrap_create_connection(address, timeout,
-                                               source_address):
-                        sock = socket.create_connection(
-                            address, timeout, source_address)
-                        # wrap the socket with proxy protocol socket
-                        pp_context = proxy_protocol_context.ProxyProtocolCtx(
-                            server_side=False)
-                        print("wrapping socket with proxy protocol")
-                        pp_sock = pp_context.wrap_socket(sock)
-                        return pp_sock
-
                     self.tls.conns[origin] = http.client.HTTPConnection(
                         replay_server, timeout=self.timeout)
-
-                    self.tls.conns[origin]._create_connection = wrap_create_connection
+                    # wrap_create_connection
+                    self.tls.conns[origin]._create_connection = proxy_protocol_context.create_connection_and_send_pp
                     # for http, monkey patch the create_connection method so that the proxy protocol socket is used
             conn = self.tls.conns[origin]
 

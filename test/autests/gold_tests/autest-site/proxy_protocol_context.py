@@ -103,14 +103,13 @@ class ProxyProtocolCtx(socket.socket):
         super().__init__()
 
     def wrap_socket(self, sock):
-
         # TODO: learn strucuture from ssl lib: return self.sslsocket_class._create(
         self._socket = sock
         if not self._server_side:
             self._client_socket = sock
             # for client-side socket, we send the proxy protocol header to the original underlying socket right way.
             # TODO: have a flag to control this behavior. The flag should be set to true if the proxy protocol header is received by the proxy
-            send_proxy_header(self._client_socket, proxy_protocol_version=1)
+            #send_proxy_header(self._client_socket, proxy_protocol_version=1)
         return self
 
     def getsockname(
@@ -125,17 +124,13 @@ class ProxyProtocolCtx(socket.socket):
         print("calling the overridden accept method")
         client_sock, client_addr = self._socket.accept()
         read_pp_header_if_present(client_sock)
-        # TODO: create a new ProxyProtocolCtx object here. see if there is a better way to do this
         # TODO: if we got pp, set the version that is going to be sent to the server
-
-        # TODO: think about whether we can consolidate the logic here with the logic in accept, removing the wfile and rfile and stuff, since we don't need control beyond this point
-
         if self._use_ssl:
             print("wrapping the socket with ssl")
             client_sock = self._ssl_ctx.wrap_socket(
                 client_sock, server_side=True)
+        # Returning the raw client socket at this point, since we are done with proxy protocol processing and yield control beyond this point
         return client_sock, client_addr
-        return ProxyProtocolCtx(server_side=True, client_sock=client_sock, use_ssl=self._use_ssl, ssl_ctx=self._ssl_ctx), client_addr
 
     def create_connection(address, timeout, source_address):
         raise NotImplementedError("create_connection is not implemented")
@@ -337,3 +332,12 @@ def check_for_proxy_header(data):
         pp_length = parse_pp_v2(data)
         print(f"Received {pp_length} bytes of Proxy Protocol v2")
     return pp_length
+
+
+def create_connection_and_send_pp(address, timeout,
+                                  source_address):
+    sock = socket.create_connection(
+        address, timeout, source_address)
+    # send proxy protocol header
+    send_proxy_header(sock, proxy_protocol_version=1)
+    return sock
