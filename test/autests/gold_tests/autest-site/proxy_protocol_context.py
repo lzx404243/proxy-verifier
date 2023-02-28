@@ -11,84 +11,84 @@ PP_V2_PREFIX = b'\x0d\x0a\x0d\x0a\x00\x0d\x0a\x51\x55\x49\x54\x0a'
 PP_MAX_DATA_SIZE = 108
 
 
-class SocketFileWrapper(io.RawIOBase):
-    # This class is a wrapper around the socket object that is used to append/strip off the proxy protocol header. This is needed as the the xxx class which the tests use used the file abstraction to read and write data, instead of using the standard socket API such as send(), recv(). This is a read/write file-like object. The write is unbuffered just as the default impletation in SocketServer.py
+# class SocketFileWrapper(io.RawIOBase):
+#     # This class is a wrapper around the socket object that is used to append/strip off the proxy protocol header. This is needed as the the xxx class which the tests use used the file abstraction to read and write data, instead of using the standard socket API such as send(), recv(). This is a read/write file-like object. The write is unbuffered just as the default impletation in SocketServer.py
 
-    def __init__(self, sock, mode, buffering, use_ssl=False, ssl_ctx=None, server_side=False):
-        self.sock = sock
-        self.file = sock.makefile(mode, buffering)
-        self._buffering = buffering
-        self._file_mode = mode
-        self._check_for_pp_header = True
-        self._is_server_side = server_side
-        self._use_ssl = use_ssl
-        self._ssl_ctx = ssl_ctx
+#     def __init__(self, sock, mode, buffering, use_ssl=False, ssl_ctx=None, server_side=False):
+#         self.sock = sock
+#         self.file = sock.makefile(mode, buffering)
+#         self._buffering = buffering
+#         self._file_mode = mode
+#         self._check_for_pp_header = True
+#         self._is_server_side = server_side
+#         self._use_ssl = use_ssl
+#         self._ssl_ctx = ssl_ctx
 
-    def check_for_proxy_header(self, data):
-        # check for proxy protocol header. Most of the code here is borrowed from Brian Neradt's proxy_protocol_server in ATS repo
-        #print("checking for proxy protocol header")
-        pp_length = 0
-        if (data.startswith(b'PROXY') and b'\r\n' in data):
-            pp_length = parse_pp_v1(data)
-            print(f"Received {pp_length} bytes of Proxy Protocol v1")
+#     def check_for_proxy_header(self, data):
+#         # check for proxy protocol header. Most of the code here is borrowed from Brian Neradt's proxy_protocol_server in ATS repo
+#         #print("checking for proxy protocol header")
+#         pp_length = 0
+#         if (data.startswith(b'PROXY') and b'\r\n' in data):
+#             pp_length = parse_pp_v1(data)
+#             print(f"Received {pp_length} bytes of Proxy Protocol v1")
 
-        if data.startswith(PP_V2_PREFIX):
-            pp_length = parse_pp_v2(data)
-            print(f"Received {pp_length} bytes of Proxy Protocol v2")
-        return pp_length
+#         if data.startswith(PP_V2_PREFIX):
+#             pp_length = parse_pp_v2(data)
+#             print(f"Received {pp_length} bytes of Proxy Protocol v2")
+#         return pp_length
 
-    def read_pp_header_if_present(self):
-        # peek at the file content to check for proxy protocol header
-        print("checking for proxy protocol header")
-        data = self.file.peek(PP_MAX_DATA_SIZE)
-        pp_bytes = self.check_for_proxy_header(data)
-        if pp_bytes > 0:
-            # read the pp header bytes from the file
-            print(f"reading {pp_bytes} bytes from the file")
-            self.file.read(pp_bytes)
-        return
+#     def read_pp_header_if_present(self):
+#         # peek at the file content to check for proxy protocol header
+#         print("checking for proxy protocol header")
+#         data = self.file.peek(PP_MAX_DATA_SIZE)
+#         pp_bytes = self.check_for_proxy_header(data)
+#         if pp_bytes > 0:
+#             # read the pp header bytes from the file
+#             print(f"reading {pp_bytes} bytes from the file")
+#             self.file.read(pp_bytes)
+#         return
 
-    def read(self, size):
-        print("calling read method!")
-        if self._check_for_pp_header:
-            # happens only once
-            self.read_pp_header_if_present()
-            self._check_for_pp_header = False
-            if self._use_ssl and self.is_server_side:
-                print("wrapping the socket with ssl")
-                self.wrapSSL(self._ssl_ctx)
-                print("done SSL wrapping!")
-        data = self.file.read(size)
-        print(f"data content: {data}")
-        return data
+#     def read(self, size):
+#         print("calling read method!")
+#         if self._check_for_pp_header:
+#             # happens only once
+#             self.read_pp_header_if_present()
+#             self._check_for_pp_header = False
+#             if self._use_ssl and self.is_server_side:
+#                 print("wrapping the socket with ssl")
+#                 self.wrapSSL(self._ssl_ctx)
+#                 print("done SSL wrapping!")
+#         data = self.file.read(size)
+#         print(f"data content: {data}")
+#         return data
 
-    def readline(self, size):
-        print("calling the readline method!")
-        if self._check_for_pp_header:
-            # happens only once
-            self.read_pp_header_if_present()
-            self._check_for_pp_header = False
-            if self._use_ssl:
-                print("wrapping the socket with ssl")
-                self.wrapSSL()
-                print("done SSL wrapping!")
-        data = self.file.readline(size)
-        print(f"data content: {data}")
-        return data
+#     def readline(self, size):
+#         print("calling the readline method!")
+#         if self._check_for_pp_header:
+#             # happens only once
+#             self.read_pp_header_if_present()
+#             self._check_for_pp_header = False
+#             if self._use_ssl:
+#                 print("wrapping the socket with ssl")
+#                 self.wrapSSL()
+#                 print("done SSL wrapping!")
+#         data = self.file.readline(size)
+#         print(f"data content: {data}")
+#         return data
 
-    def wrapSSL(self):
-        self.sock = self._ssl_ctx.wrap_socket(
-            self.sock, server_side=True)
-        # TODO: double check the file mode and buffering mode
-        print("updating the new file objects")
-        self.file = self.sock.makefile(self._file_mode, self._buffering)
+#     def wrapSSL(self):
+#         self.sock = self._ssl_ctx.wrap_socket(
+#             self.sock, server_side=True)
+#         # TODO: double check the file mode and buffering mode
+#         print("updating the new file objects")
+#         self.file = self.sock.makefile(self._file_mode, self._buffering)
 
-    def write(self, b):
-        # send those out immediately as the original implementation does unbuffered write by default anyway
-        return self.sock.sendall(b)
+#     def write(self, b):
+#         # send those out immediately as the original implementation does unbuffered write by default anyway
+#         return self.sock.sendall(b)
 
-    def close(self):
-        self.file.close()
+#     def close(self):
+#         self.file.close()
 
 
 class ProxyProtocolCtx(socket.socket):
@@ -130,6 +130,11 @@ class ProxyProtocolCtx(socket.socket):
 
         # TODO: think about whether we can consolidate the logic here with the logic in accept, removing the wfile and rfile and stuff, since we don't need control beyond this point
 
+        if self._use_ssl:
+            print("wrapping the socket with ssl")
+            client_sock = self._ssl_ctx.wrap_socket(
+                client_sock, server_side=True)
+        return client_sock, client_addr
         return ProxyProtocolCtx(server_side=True, client_sock=client_sock, use_ssl=self._use_ssl, ssl_ctx=self._ssl_ctx), client_addr
 
     def create_connection(address, timeout, source_address):
@@ -151,6 +156,7 @@ class ProxyProtocolCtx(socket.socket):
 
     def makefile(self, mode="r", buffering=None):
         print("proxy ctx makefile is called")
+        return self._client_socket.makefile(mode, buffering)
         if self.rwfile:
             return self.rwfile
         print("creating a new SocketFileWrapper")
@@ -310,7 +316,6 @@ def send_proxy_header(sock, proxy_protocol_version):
 
 def read_pp_header_if_present(sock):
     # peek at the file content to check for proxy protocol header
-    print("checking for proxy protocol header")
     data = sock.recv(PP_MAX_DATA_SIZE, socket.MSG_PEEK)
     pp_bytes = check_for_proxy_header(data)
     if pp_bytes > 0:
