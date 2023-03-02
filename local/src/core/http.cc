@@ -85,22 +85,13 @@ bwformat(BufferWriter &w, bwf::Spec const & /* spec */, HttpHeader const &h)
 BufferWriter &
 bwformat(BufferWriter &w, bwf::Spec const & /*spec*/, ProxyProtocolUtil const &h)
 {
-  auto version = h.get_version();
-  w.print("Received PROXY header v{}:\n", static_cast<int>(version));
-  if (version == ProxyProtocolVersion::V1) {
-    // v1 header is sent as a human-readable string. So we can just print it
-    // here.
-    w.print("{}", swoc::TextView(h._hdr->v1.line).prefix_at('\0'));
-  } else {
-    // v2 header
-    // TODO: print family names. also, remove the _hdr
-    IPAddr src_addr(reinterpret_cast<in_addr_t>(ntohl(h._hdr->v2.addr.ip4.src_addr)));
-    IPAddr dst_addr(reinterpret_cast<in_addr_t>(ntohl(h._hdr->v2.addr.ip4.dst_addr)));
-    IPEndpoint src_ep, dst_ep;
-    src_ep.assign(src_addr, h._hdr->v2.addr.ip4.src_port);
-    dst_ep.assign(dst_addr, h._hdr->v2.addr.ip4.dst_port);
-    w.print("PROXY {0::a} {1::a} {0::p} {1::p}", src_ep, dst_ep);
-  }
+  w.print("Received PROXY header v{}:\n", static_cast<int>(h.get_version()));
+  w.print(
+      "PROXY {}{} {2::a} {3::a} {2::p} {3::p}",
+      swoc::bwf::If(h._src_addr.is_ip4(), "TCP4"),
+      swoc::bwf::If(h._src_addr.is_ip6(), "TCP6"),
+      h._src_addr,
+      h._dst_addr);
   return w;
 }
 } // namespace SWOC_VERSION_NS
@@ -842,29 +833,28 @@ Session::read_and_parse_request(swoc::FixedBufferWriter &buffer)
 swoc::Errata
 Session::read_and_parse_proxy_hdr()
 {
-  // reading the PROXY data if any. one recv() should be okay, since it's gurantee to fit
-  auto pp_hdr = std::make_shared<ProxyHdr>();
+  // reading the PROXY data if any. one recv() should be okay, since it's
+  // gurantee to fit
   swoc::Errata errata;
-  swoc::MemSpan<void> span{(pp_hdr.get()), sizeof(*pp_hdr)};
+  swoc::LocalBufferWriter<MAX_PP_HDR_SIZE> w;
   errata.note(S_DIAG, "Peeking at the socketdata to check PROXY header");
-  //  Peek at the data to make sure it's a PROXY header
-  auto zret = peek({reinterpret_cast<char *>(pp_hdr.get()), sizeof(*pp_hdr)});
-  auto bytes_received = zret.result();
-  errata.note(S_DIAG, "Got {} bytes", bytes_received);
-  //  got data
-  ProxyProtocolUtil ppUtil{pp_hdr};
-  auto &&[pp_parse_return, pp_parse_errata] = ppUtil.parse_header(bytes_received);
-  errata.note(std::move(pp_parse_errata));
-  int pp_bytes = pp_parse_return;
-  if (pp_bytes > 0) {
-    errata.note(S_DIAG, "Got {} of pp bytes. consuming it from socket", pp_bytes);
-    //  TODO: may need while loop
-    recv(_fd, pp_hdr.get(), pp_bytes, 0); // Peek at the data
-    // ppUtil.printHeader();
+  // Peek at the data to make sure it's a PROXY header
+  auto zret = peek(w.aux_span());
+  errata.note(std::move(zret.errata()));
+  w.commit(zret.result());
+  // try to parse the PROXY header
+  ProxyProtocolUtil ppUtil;
+  errata.note(S_DIAG, "peek got {} bytes, trying to parse PROXY header", w.size());
+  auto &&[ppNumBytes, ppParseErrata] = ppUtil.parse_header(w.view());
+  errata.note(std::move(ppParseErrata));
+  if (ppNumBytes > 0) {
+    errata.note(S_DIAG, "Got {} of pp bytes. consuming it from socket.", ppNumBytes);
+    char unusedBuf[ppNumBytes];
+    recv(_fd, unusedBuf, ppNumBytes, 0); // Peek at the data
     // print the proxy message
-    zret.note(S_DIAG, "Received an PROXY header:\n{}", ppUtil);
+    errata.note(S_INFO, "{}", ppUtil);
   } else {
-    errata.note(S_DIAG, "No PROXY header is found", pp_bytes);
+    errata.note(S_DIAG, "No valid PROXY header found, passing through.");
   }
   return errata;
 }
@@ -872,7 +862,6 @@ swoc::Rv<ssize_t>
 Session::write(TextView view)
 {
   swoc::Rv<ssize_t> zret{0};
-  zret.note(S_DIAG, "plaintext write attempt.");
   TextView remaining = view;
   while (!remaining.empty()) {
     if (this->is_closed()) {
@@ -920,8 +909,6 @@ Session::send_proxy_header(swoc::IPEndpoint const *real_target, ProxyProtocolVer
   getsockname(_fd, &addr, &len);
   swoc::IPEndpoint source_endpoint{&addr};
   ProxyProtocolUtil ppUtil(source_endpoint, *real_target, pp_version);
-  // TODO: make the following this a constant
-  constexpr size_t MAX_PP_HDR_SIZE = 108;
   swoc::LocalBufferWriter<MAX_PP_HDR_SIZE> w;
   auto pp_serialize_errata = ppUtil.serialize(w);
   errata.note(std::move(pp_serialize_errata));

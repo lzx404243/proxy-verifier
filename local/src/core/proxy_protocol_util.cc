@@ -4,86 +4,151 @@
 #include <locale>
 #include "swoc/bwf_ex.h"
 #include "swoc/bwf_ip.h"
+#include "swoc/swoc_ip.h"
 
 using swoc::Errata;
 using swoc::TextView;
+using swoc::IPAddr;
+using swoc::IP4Addr;
+using swoc::IP6Addr;
+using swoc::IPEndpoint;
 
 swoc::Rv<ssize_t>
-ProxyProtocolUtil::parse_header(ssize_t receivedBytes)
+ProxyProtocolUtil::parse_pp_header_v1(swoc::TextView data)
 {
   swoc::Rv<ssize_t> zret{-1};
-  // // find the end of the header
-  // if (data.starts_with("PROXY")) {
-  //   zret.note(S_DIAG, "got proxy protocol version 1");
-  //   // check header end
-  //   size_t end = data.find("\r\n");
-  //   if (TextView::npos != end) {
-  //     zret.note(S_DIAG, "find header end at {}", end);
-  //     zret = end + PROXY_V1_EOH.size();
-  //     return zret;
-  //   }
-  // } else {
-  //   zret.note(S_DIAG, "not found proxy protocol version 1");
-  //   zret = 0;
-  //   return zret;
-  // }
-  int size = 0;
-  if (receivedBytes >= 16 && memcmp(&_hdr->v2, V2SIG, 12) == 0 && (_hdr->v2.ver_cmd & 0xF0) == 0x20)
-  {
-    _version = ProxyProtocolVersion::V2;
-    size = 16 + ntohs(_hdr->v2.len);
-    zret = size;
-    // zret.note(S_DIAG, "got proxy protocol version 2");
-    //  size = 16 + ntohs(hdr.v2.len);
-    //  if (ret < size)
-    //    return -1; /* truncated or too large header */
-
-    switch (_hdr->v2.ver_cmd & 0xF) {
-    case 0x01: /* PROXY command */
-      switch (_hdr->v2.fam) {
-      case 0x11: /* TCPv4 */
-        zret.note(S_DIAG, "TCPv4");
-        break;
-      case 0x21: /* TCPv6 */
-        zret.note(S_DIAG, "TCPv6");
-        break;
-      default:
-        /* unsupported protocol, keep local connection address */
-        zret.note(S_ERROR, "unknown transport!");
-        break;
-      }
-      break;
-    case 0x00: /* LOCAL command */
-      /* keep local connection address for LOCAL */
-      zret.note(S_DIAG, "local command");
-      break;
-    default:
-      zret = -1;
-      zret.note(S_ERROR, "unknown command!");
-      return zret; /* not a supported command */
-    }
-  } else if (receivedBytes >= 8 && memcmp(_hdr->v1.line, "PROXY", 5) == 0) {
-    _version = ProxyProtocolVersion::V1;
-    // zret.note(S_DIAG, "I got proxy protocol version 1");
-    char *end = (char *)memchr(_hdr->v1.line, '\r', receivedBytes - 1);
-    if (!end || end[1] != '\n') {
-      zret.note(S_ERROR, "not found header end!");
-      return zret; /* partial or invalid header */
-    }
-    *end = '\0';                    /* terminate the string to ease parsing */
-    size = end + 2 - _hdr->v1.line; /* skip header + CRLF */
-    zret = size;
-    // std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> converter;
-    // std::wstring decoded_string = converter.from_bytes(_hdr->v1.line);
-    // std::cout << "proxy protocol header content " << std::endl;
-    // std::wcout << decoded_string << std::endl;
-    // zret.note(S_INFO, "proxy protocol header content {}", decoded_string);
-    return zret;
-  } else {
-    /* Wrong protocol */
-    zret.note(S_DIAG, "not proxy protocol. Passing through");
+  size_t size = 0;
+  zret.note(S_DIAG, "v1 content: {}", data);
+  zret.note(S_DIAG, "v1 bytes: {}", data.size());
+  _version = ProxyProtocolVersion::V1;
+  auto offset = data.find(PROXY_V1_EOH);
+  if (offset == TextView::npos) {
+    // partial or invalid header
+    zret.note(S_ERROR, "Incomplete or invalid PROXY header");
     return zret;
   }
+
+  size = offset + PROXY_V1_EOH.size();
+  zret.note(S_DIAG, "EOH size: {}", PROXY_V1_EOH.size());
+  zret.note(S_DIAG, "calculated size bytes: {}", data.size());
+  zret = size;
+  // Assuming the PROXY header has already been validated, we can just skip the
+  // "PROXY "
+  data += V1SIG.size() + 1;
+  // parse family
+  auto familyView = data.split_prefix_at(PP_V1_DELIMITER);
+  if (familyView.empty()) {
+    zret.note(S_ERROR, "Invalid PROXY header: expecting network family");
+    return zret;
+  }
+
+  // parse source IP address
+  auto srcIPView = data.split_prefix_at(PP_V1_DELIMITER);
+  if (srcIPView.empty()) {
+    zret.note(S_ERROR, "Invalid PROXY header: expecting source IP");
+    return zret;
+  }
+  IPAddr srcIP(srcIPView);
+
+  // parse dest IP address
+  auto dstIPView = data.split_prefix_at(PP_V1_DELIMITER);
+  if (dstIPView.empty()) {
+    zret.note(S_ERROR, "Invalid PROXY header: expecting destination IP");
+    return zret;
+  }
+  IPAddr dstIP(dstIPView);
+
+  // parse the port
+  zret.note(S_DIAG, "before the source port content: {}", data);
+  auto srcPortView = data.split_prefix_at(PP_V1_DELIMITER);
+  if (srcPortView.empty()) {
+    zret.note(S_ERROR, "Invalid PROXY header: expecting source port");
+    return zret;
+  }
+  auto srcPort = swoc::svto_radix<10>(srcPortView);
+  // parse the dest port
+  zret.note(S_DIAG, "before the dest port content: {:x}", data);
+  auto dstPortView = data.split_prefix_at('\r');
+  if (dstPortView.empty()) {
+    zret.note(S_ERROR, "Invalid PROXY header: expecting destination port");
+    return zret;
+  }
+  auto dstPort = swoc::svto_radix<10>(dstPortView);
+  // assign the source and destination addresses
+  _src_addr.assign(srcIP, htons(srcPort));
+  _dst_addr.assign(dstIP, htons(dstPort));
+  return zret;
+}
+
+swoc::Rv<ssize_t>
+ProxyProtocolUtil::parse_pp_header_v2(swoc::TextView data)
+{
+  swoc::Rv<ssize_t> zret{-1};
+  auto receivedBytes = data.size();
+  auto const *hdr = reinterpret_cast<const ProxyHdr *>(data.data());
+  size_t size = 0;
+  zret.note(S_DIAG, "received bytes: {}", receivedBytes);
+  // PROXY header v2
+  _version = ProxyProtocolVersion::V2;
+  size = 16 + ntohs(hdr->v2.len);
+  if (receivedBytes < size) {
+    // truncated or too large header
+    return zret;
+  }
+  zret = size;
+  switch (hdr->v2.ver_cmd & 0xF) {
+  case 0x01: /* PROXY command */
+    switch (hdr->v2.fam) {
+    case 0x11: /* TCPv4 */
+      // the ntohl() is needed because the address is stored in network byte
+      // order and IPAddr expects a host byte order, which would in turn get
+      // converted to network byte order in IPEndpoint.assign()
+      _src_addr.assign(
+          IPAddr(reinterpret_cast<in_addr_t>(ntohl(hdr->v2.addr.ip4.src_addr))),
+          hdr->v2.addr.ip4.src_port);
+      _dst_addr.assign(
+          IPAddr(reinterpret_cast<in_addr_t>(ntohl(hdr->v2.addr.ip4.dst_addr))),
+          hdr->v2.addr.ip4.dst_port);
+      break;
+    case 0x21: /* TCPv6 */
+    {
+      IP6Addr srcAddrNetworkOrder(
+          swoc::TextView(reinterpret_cast<const char *>(hdr->v2.addr.ip6.src_addr), 16));
+      IP6Addr dstAddrNetworkOrder(
+          swoc::TextView(reinterpret_cast<const char *>(hdr->v2.addr.ip6.dst_addr), 16));
+      // the network_order() is essentially reordering the byte order. In this
+      // case, the function converts from address in network byte order to host
+      // byte order. This is confusing, but seems to be a convenient way to do
+      // this operation for IPv6.
+      _src_addr.assign(IP6Addr(srcAddrNetworkOrder.network_order()), hdr->v2.addr.ip6.src_port);
+      _dst_addr.assign(IP6Addr(dstAddrNetworkOrder.network_order()), hdr->v2.addr.ip6.dst_port);
+      break;
+    }
+    default:
+      /* unsupported transport protocol */
+      zret.note(S_DIAG, "unsupported transport found in PROXY header");
+      break;
+    }
+    break;
+  default:
+    zret.note(S_DIAG, "unsupported command found in PROXY header");
+    return zret; /* not a supported command */
+  }
+  return zret;
+}
+
+swoc::Rv<ssize_t>
+ProxyProtocolUtil::parse_header(swoc::TextView data)
+{
+  swoc::Rv<ssize_t> zret{-1};
+  auto receivedBytes = data.size();
+  zret.note(S_DIAG, "received bytes: {}", receivedBytes);
+  if (receivedBytes >= 16 && (data.starts_with(V2SIG))) {
+    return parse_pp_header_v2(data);
+  } else if (receivedBytes >= 8 && data.starts_with(V1SIG)) {
+    return parse_pp_header_v1(data);
+  }
+  zret.note(S_DIAG, "No valid PROXY protocol detected.");
   return zret;
 }
 
@@ -123,8 +188,9 @@ ProxyProtocolUtil::construct_v2_header(swoc::BufferWriter &buf) const
 {
   swoc::Errata errata;
   ProxyHdr proxy_hdr;
-  memcpy(proxy_hdr.v2.sig, V2SIG, sizeof(V2SIG));
-  // only support the PROXY command for now
+  // memcpy(proxy_hdr.v2.sig, V2SIGOLD, sizeof(V2SIGOLD));
+  memcpy(proxy_hdr.v2.sig, V2SIG.data(), V2SIG.size());
+  //  only support the PROXY command for now
   proxy_hdr.v2.ver_cmd = 0x21;
   int addr_len = 0;
   if (_src_addr.is_ip4()) {
@@ -151,15 +217,7 @@ ProxyProtocolUtil::construct_v2_header(swoc::BufferWriter &buf) const
     proxy_hdr.v2.addr.ip6.src_port = _src_addr.network_order_port();
     proxy_hdr.v2.addr.ip6.dst_port = _dst_addr.network_order_port();
   }
-  // buf.print(
-  //     "PROXY {}{} {2::a} {3::a} {2::p} {3::p}\r\n",
-  //     swoc::bwf::If(_src_addr.is_ip4(), "TCP4"),
-  //     swoc::bwf::If(_src_addr.is_ip6(), "TCP6"),
-  //     _src_addr,
-  //     _dst_addr);
-  errata.note(S_DIAG, "writing {} bytes to buf", addr_len + 16);
   buf.write(&proxy_hdr, addr_len + 16);
   errata.note(S_INFO, "construcuting {} bytes of proxy protocol v2 header", buf.size());
-  errata.note(S_INFO, "buf content: {:x}", buf);
   return errata;
 }

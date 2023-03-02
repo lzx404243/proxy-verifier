@@ -17,7 +17,21 @@ enum class ProxyProtocolVersion { NONE = 0, V1 = 1, V2 = 2 };
 /// PROXY header v1 end of header.
 static constexpr swoc::TextView PROXY_V1_EOH{"\r\n"};
 
-const char V2SIG[12] = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
+static constexpr size_t MAX_PP_HDR_SIZE = 108;
+
+static constexpr char PP_V1_DELIMITER = ' ';
+
+static const swoc::TextView V1SIG("PROXY");
+// static const swoc::TextView V2SIG(
+//     reinterpret_cast<const char *>(
+//         "0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A"),
+//     12);
+using namespace std::literals;
+
+constexpr swoc::TextView V2SIG = "\x0D\x0A\x0D\x0A\x00\x0D\x0A\x51\x55\x49\x54\x0A"sv;
+// const char V2SIGOLD[12] = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54,
+// 0x0A};
+
 union ProxyHdr {
   struct
   {
@@ -44,11 +58,6 @@ union ProxyHdr {
         uint16_t src_port;
         uint16_t dst_port;
       } ip6;
-      //   struct
-      //   { /* for AF_UNIX sockets, len = 216 */
-      //     uint8_t src_addr[108];
-      //     uint8_t dst_addr[108];
-      //   } unx;
     } addr;
   } v2;
 };
@@ -58,9 +67,6 @@ class ProxyProtocolUtil
 {
 public:
   ProxyProtocolUtil() = default;
-  // TODO: make the following constructor to take a ProxyHdr buf. Call parse
-  // in it
-  ProxyProtocolUtil(std::shared_ptr<ProxyHdr> data) : _hdr(data){};
   ProxyProtocolUtil(ProxyProtocolVersion version) : _version(version){};
   ProxyProtocolUtil(swoc::IPEndpoint src_ep, swoc::IPEndpoint dst_ep, ProxyProtocolVersion version)
     : _version(version)
@@ -69,7 +75,7 @@ public:
 
   // parse the header, returning the number of bytes if it is a valid header, or
   // 0 if it is not a PROXY header
-  swoc::Rv<ssize_t> parse_header(ssize_t receivedBytes);
+  swoc::Rv<ssize_t> parse_header(swoc::TextView data);
 
   ProxyProtocolVersion get_version() const;
   swoc::Errata serialize(swoc::BufferWriter &buf) const;
@@ -77,11 +83,14 @@ public:
   swoc::Errata construct_v2_header(swoc::BufferWriter &buf) const;
   // TODO: change the  access level back to private
 public:
-  // TODO: remove the _hdr
-  std::shared_ptr<ProxyHdr> _hdr;
-  ProxyProtocolVersion _version;
+  ProxyProtocolVersion _version = ProxyProtocolVersion::NONE;
   swoc::IPEndpoint _src_addr;
   swoc::IPEndpoint _dst_addr;
+
+private:
+  swoc::Rv<ssize_t> parse_pp_header_v1(swoc::TextView data);
+
+  swoc::Rv<ssize_t> parse_pp_header_v2(swoc::TextView data);
 };
 
 inline ProxyProtocolVersion
