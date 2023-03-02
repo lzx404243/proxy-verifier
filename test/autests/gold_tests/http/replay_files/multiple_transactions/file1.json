@@ -11,6 +11,10 @@
                 {
                     "name": "ip",
                     "version": 4
+                },
+                {
+                    "name": "proxy-protocol",
+                    "version": 1
                 }
             ],
             "connection-time": 1552689640420177239,
@@ -329,6 +333,10 @@
                 {
                     "name": "ip",
                     "version": 4
+                },
+                {
+                    "name": "proxy-protocol",
+                    "version": 2
                 }
             ],
             "connection-time": 1552705858733650009,

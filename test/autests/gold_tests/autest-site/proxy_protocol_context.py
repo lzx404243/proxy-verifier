@@ -159,24 +159,25 @@ class ProxyProtocolUtil:
         pp_num_bytes = ProxyProtocolUtil.check_for_proxy_header(data)
         if pp_num_bytes > 0:
             # read the pp header bytes from the file
-            print(
-                f"Received {pp_num_bytes} bytes of Proxy Protocol V{ProxyProtocolUtil.pp_version.value}. Consuming it from the socket.")
             sock.recv(pp_num_bytes)
         return
 
     @staticmethod
     def check_for_proxy_header(data):
-        # check for proxy protocol header. Most of the code called here is
-        # borrowed from Brian Neradt's proxy_protocol_server in ATS repo
-        print("checking for proxy protocol header")
+        print("checking for PROXY protocol header")
         pp_length = 0
         ProxyProtocolUtil.pp_version = ProxyProtocolVersion.NONE
+        # The parsing code here is largely adopted from Brian Neradt's
+        # proxy_protocol_server in the ATS repo
         if (data.startswith(b'PROXY') and b'\r\n' in data):
             pp_length = ProxyProtocolUtil.parse_pp_v1(data)
             ProxyProtocolUtil.pp_version = ProxyProtocolVersion.V1
         if data.startswith(PP_V2_PREFIX):
             pp_length = ProxyProtocolUtil.parse_pp_v2(data)
             ProxyProtocolUtil.pp_version = ProxyProtocolVersion.V2
+        if pp_length > 0:
+            print(
+                f"Received {pp_length} bytes of Proxy Protocol V{ProxyProtocolUtil.pp_version.value}")
         return pp_length
 
     @staticmethod
@@ -185,7 +186,7 @@ class ProxyProtocolUtil:
         sock = socket.create_connection(
             address, timeout, source_address)
         if ProxyProtocolUtil.pp_version != ProxyProtocolVersion.NONE:
-            # send proxy protocol header
+            # send the PROXY protocol header
             ProxyProtocolUtil.send_proxy_header(
                 sock, ProxyProtocolUtil.pp_version)
         return sock

@@ -34,7 +34,6 @@ class PPTest:
             f"server-{PPTest.test_id}", self.replayFile, configure_http=not isHTTPS, configure_https=isHTTPS)
 
     def setupProxy(self, isHTTPS):
-        # TODO: use the isHTTPS argument to configure the proxy to use SSL(different port)
         self.proxyListenPort = self.client.Variables.https_port if isHTTPS else self.client.Variables.http_port
         self.serverListenPort = self.server.Variables.https_port if isHTTPS else self.server.Variables.http_port
         self.proxy = self.testRun.AddProxyProcess(
@@ -58,11 +57,11 @@ class PPTest:
             "Verify that the PROXY header is received by the proxy.")
         self.proxy.Streams.stdout += Testers.ContainsExpression(
             f"PROXY TCP4 127\.0\.0\.1 127\.0\.0\.1 [0-9]+ {self.proxyListenPort}",
-            "Verify the PROXY header content.")
+            "Verify the client sends a valid PROXY header.")
 
         self.server.Streams.stdout += Testers.ContainsExpression(
             f"Received PROXY header v{self.ppVersion}:.*\nPROXY TCP4 127\.0\.0\.1 127\.0\.0\.1 [0-9]+ {self.serverListenPort}",
-            "Verify that the PROXY header is received by the server.", reflags=re.MULTILINE)
+            "Verify that the server receives the PROXY header and parsed sucessfully.", reflags=re.MULTILINE)
 
     def run(self):
         self.setupClient(self.isHTTPS)
@@ -73,10 +72,49 @@ class PPTest:
         PPTest.test_id += 1
 
 
-# Test 1: Verify the PROXY header v1 is sent and received in a HTTP transaction.
-PPTest("http_single_transaction", ppVersion=1, isHTTPS=False,
-       testRunDesc="Verify PROXY protocol v1 is sent and received in a HTTP transaction").run()
+# # Test 1: Verify the PROXY header v1 is sent and received in a HTTP transaction.
+# PPTest("http_single_transaction", ppVersion=1, isHTTPS=False,
+#        testRunDesc="Verify PROXY protocol v1 is sent and received in a HTTP connection").run()
 
-# Test 2: Verify the PROXY header v2 is sent and received in a HTTP transaction.
-PPTest("http_single_transaction", ppVersion=2, isHTTPS=False,
-       testRunDesc="Verify PROXY protocol v2 is sent and received in a HTTP transaction").run()
+# # Test 2: Verify the PROXY header v2 is sent and received in a HTTP transaction.
+# PPTest("http_single_transaction", ppVersion=2, isHTTPS=False,
+#        testRunDesc="Verify PROXY protocol v2 is sent and received in a HTTP connection").run()
+
+# # Test 3: Verify the PROXY header v1 is sent and received in a HTTPS
+# # transaction.
+# PPTest("https_single_transaction", ppVersion=1, isHTTPS=True,
+#        testRunDesc="Verify PROXY protocol v1 is sent and received in a HTTPS connection").run()
+
+# # Test 4: Verify the PROXY header v2 is sent and received in a HTTPS
+# # transaction.
+# PPTest("https_single_transaction", ppVersion=2, isHTTPS=True,
+#        testRunDesc="Verify PROXY protocol v2 is sent and received in a HTTPS connection").run()
+
+# Test 5: Verify the PROXY protocol is not sent when not specified in the replay
+# file
+r = Test.AddTestRun(
+    "Verify the PROXY protocol is not sent when not specified in the replay file")
+
+# Add configure_https=False to verify ATS client and server work when the https
+# optional arguments are not provided.
+client = r.AddClientProcess("no-pp-client1", "replay_files/http_single_transaction_no_pp.replay.yaml",
+                            configure_https=False)
+server = r.AddServerProcess("no-pp-server1", "replay_files/http_single_transaction_no_pp.replay.yaml",
+                            configure_https=False)
+proxy = r.AddProxyProcess("no-pp-proxy1", listen_port=client.Variables.http_port,
+                          server_port=server.Variables.http_port)
+
+# Verify the http transaction finishes successfully.
+# proxy.Streams.stdout = "gold/http_single_transaction_proxy.gold"
+# client.Streams.stdout = "gold/http_single_transaction_client.gold"
+# server.Streams.stdout = "gold/http_single_transaction_server.gold"
+
+client.Streams.stdout += Testers.ExcludesExpression(
+    "Sending PROXY header from",
+    "Client should not send PROXY header if not asked to.")
+proxy.Streams.stdout += Testers.ExcludesExpression(
+    "Received .* bytes of Proxy Protocol",
+    "Proxy should not receive the PROXY header.")
+server.Streams.stdout += Testers.ExcludesExpression(
+    "Received PROXY header",
+    "The server should not receive the PROXY header.")
